@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trading Journal</title>
+<meta name="description" content="A simple trading journal: log entries, stops, targets, emotions and lessons, and see your edge in the numbers.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%2316a34a'/><path d='M18 68l20-22 14 12 30-34' stroke='white' stroke-width='9' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">&#9650;</span> Trading Journal</div>
+  <nav>
+    <button class="tab active" data-view="dashboard">Dashboard</button>
+    <button class="tab" data-view="journal">Journal</button>
+    <button class="tab" data-view="settings">Data</button>
+  </nav>
+  <button class="btn primary" id="newTradeBtn">+ New trade</button>
+</header>
+
+<main>
+  <!-- DASHBOARD -->
+  <section id="view-dashboard" class="view active">
+    <div class="stats" id="stats"></div>
+    <div class="grid2">
+      <div class="card"><h2>Equity curve</h2><div id="equity" class="chart"></div></div>
+      <div class="card"><h2>Plan adherence vs. result</h2><p class="muted small">Average P&amp;L by how well you followed your plan (1–5).</p><div id="adherence" class="chart"></div></div>
+    </div>
+    <div class="grid2">
+      <div class="card"><h2>P&amp;L by emotion at entry</h2><div id="emoEntry" class="bars"></div></div>
+      <div class="card"><h2>P&amp;L by emotion at exit</h2><div id="emoExit" class="bars"></div></div>
+    </div>
+    <div class="card"><h2>Recent lessons</h2><div id="lessons"></div></div>
+  </section>
+
+  <!-- JOURNAL -->
+  <section id="view-journal" class="view">
+    <div class="toolbar">
+      <input type="search" id="search" placeholder="Search instrument, signal, notes…">
+      <select id="fResult"><option value="">All results</option><option value="win">Wins</option><option value="loss">Losses</option><option value="be">Breakeven</option></select>
+      <select id="fDir"><option value="">Long &amp; short</option><option value="long">Long</option><option value="short">Short</option></select>
+    </div>
+    <div id="list"></div>
+  </section>
+
+  <!-- DATA -->
+  <section id="view-settings" class="view">
+    <div class="card">
+      <h2>Your data</h2>
+      <p class="muted">Everything is stored in this browser only (localStorage). Nothing is uploaded. Export a backup regularly.</p>
+      <div class="row">
+        <button class="btn" id="exportJson">Export JSON</button>
+        <button class="btn" id="exportCsv">Export CSV</button>
+        <label class="btn">Import JSON<input type="file" id="importFile" accept=".json" hidden></label>
+        <button class="btn" id="loadDemo">Load demo data</button>
+        <button class="btn danger" id="wipe">Delete all</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Minimum a journal should document</h2>
+      <ul class="check">
+        <li>Entry signal, stop loss, profit target, trailing stop</li>
+        <li>Emotions at entry, holding losers, holding winners, and at exit</li>
+        <li>Win rate, win size, loss size</li>
+        <li>A 1–5 rating of how well you followed your plan</li>
+        <li>What you could have done better, mentally or technically</li>
+        <li>What you learned</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<!-- TRADE FORM -->
+<dialog id="dlg">
+  <form id="form" method="dialog">
+    <div class="dlg-head"><h2 id="dlgTitle">New trade</h2><button type="button" class="x" id="closeDlg" aria-label="Close">&times;</button></div>
+    <input type="hidden" name="id">
+
+    <fieldset>
+      <legend>The trade</legend>
+      <div class="fgrid">
+        <label>Date<input type="date" name="date" required></label>
+        <label>Instrument<input name="instrument" placeholder="XAUUSD, EURUSD, RELIANCE…" required></label>
+        <label>Direction<select name="direction"><option value="long">Long</option><option value="short">Short</option></select></label>
+        <label>Size / quantity<input type="number" step="any" name="size" placeholder="1"></label>
+        <label>Entry price<input type="number" step="any" name="entry" required></label>
+        <label>Exit price<input type="number" step="any" name="exit"></label>
+        <label>Stop loss<input type="number" step="any" name="stop"></label>
+        <label>Profit target<input type="number" step="any" name="target"></label>
+        <label>Trailing stop<input name="trail" placeholder="e.g. trail 1R below swing lows, or none"></label>
+        <label>Result P&amp;L (money)<input type="number" step="any" name="pnl" placeholder="auto from prices if empty"></label>
+      </div>
+      <label>Entry signal / setup<textarea name="signal" rows="2" placeholder="What exactly triggered the entry?"></textarea></label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Emotions</legend>
+      <div class="fgrid">
+        <label>At entry<select name="emoEntry" data-emo></select></label>
+        <label>Holding losers<select name="emoLoser" data-emo></select></label>
+        <label>Holding winners<select name="emoWinner" data-emo></select></label>
+        <label>At exit<select name="emoExit" data-emo></select></label>
+      </div>
+      <label>Emotion notes<textarea name="emoNotes" rows="2" placeholder="What were you feeling and thinking?"></textarea></label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Review</legend>
+      <div class="rate">
+        <span>Followed plan?</span>
+        <div id="rating" role="radiogroup" aria-label="Plan adherence 1 to 5"></div>
+        <span class="muted small" id="ratingHint"></span>
+      </div>
+      <label>What could I have done better (mentally or technically)?<textarea name="better" rows="2"></textarea></label>
+      <label>What did I learn?<textarea name="learned" rows="2"></textarea></label>
+    </fieldset>
+
+    <div class="dlg-foot">
+      <button type="button" class="btn danger" id="delBtn" hidden>Delete</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="cancelBtn">Cancel</button>
+      <button type="submit" class="btn primary">Save trade</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" role="status"></div>
+<script src="app.js"></script>
+</body>
+</html>
