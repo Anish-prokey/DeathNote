@@ -13,6 +13,7 @@
   <div class="brand"><span class="logo">&#9650;</span> Trading Journal</div>
   <nav>
     <button class="tab active" data-view="dashboard">Dashboard</button>
+    <button class="tab" data-view="calendar">Calendar</button>
     <button class="tab" data-view="journal">Journal</button>
     <button class="tab" data-view="settings">Data</button>
   </nav>
@@ -32,6 +33,19 @@
       <div class="card"><h2>P&amp;L by emotion at exit</h2><div id="emoExit" class="bars"></div></div>
     </div>
     <div class="card"><h2>Recent lessons</h2><div id="lessons"></div></div>
+  </section>
+
+  <!-- CALENDAR -->
+  <section id="view-calendar" class="view">
+    <div class="cal-head">
+      <button class="btn" id="calPrev" aria-label="Previous month">&lsaquo;</button>
+      <h2 id="calTitle"></h2>
+      <button class="btn" id="calNext" aria-label="Next month">&rsaquo;</button>
+      <button class="btn" id="calToday">Today</button>
+    </div>
+    <div class="stats" id="calStats"></div>
+    <div class="cal" id="cal"></div>
+    <p class="muted small">Click a day with trades to see them in the Journal; click an empty day to log a trade on that date.</p>
   </section>
 
   <!-- JOURNAL -->

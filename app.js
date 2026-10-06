@@ -12,6 +12,10 @@ const sgn = n => n > 0 ? 'pos' : n < 0 ? 'neg' : '';
 
 let trades = load();
 let rating = 0;
+const now0 = new Date();
+let calY = now0.getFullYear(), calM = now0.getMonth();
+const pad = n => String(n).padStart(2, '0');
+const ymd = (y, m, d) => `${y}-${pad(m + 1)}-${pad(d)}`;
 
 function load() { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; } }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(trades)); } catch { toast('Could not save (storage blocked)'); } }
@@ -123,7 +127,7 @@ function renderList() {
   const q = $('#search').value.toLowerCase(), fr = $('#fResult').value, fd = $('#fDir').value;
   const list = trades.slice().sort((a, b) => b.date.localeCompare(a.date) || b.created - a.created).filter(t =>
     (!fr || result(t) === fr) && (!fd || t.direction === fd) &&
-    (!q || [t.instrument, t.signal, t.emoNotes, t.better, t.learned, t.trail].join(' ').toLowerCase().includes(q)));
+    (!q || [t.date, t.instrument, t.signal, t.emoNotes, t.better, t.learned, t.trail].join(' ').toLowerCase().includes(q)));
   if (!list.length) { $('#list').innerHTML = `<div class="empty">${trades.length ? 'No trades match your filters.' : 'No trades yet. Click “+ New trade” to log your first one, or load demo data in the Data tab.'}</div>`; return; }
   $('#list').innerHTML = list.map(t => {
     const r = rMultiple(t), pnl = t.pnl;
@@ -137,7 +141,42 @@ function renderList() {
   }).join('');
 }
 
-function renderAll() { renderStats(); renderEquity(); renderAdherence(); renderEmotionBars('#emoEntry', 'emoEntry'); renderEmotionBars('#emoExit', 'emoExit'); renderLessons(); renderList(); }
+// ---- calendar ----
+function renderCalendar() {
+  $('#calTitle').textContent = new Date(calY, calM, 1).toLocaleString(undefined, { month: 'long', year: 'numeric' });
+  const prefix = `${calY}-${pad(calM + 1)}-`, byDay = {};
+  closed().filter(t => t.date.startsWith(prefix)).forEach(t => (byDay[t.date] ||= []).push(t));
+  const all = Object.values(byDay).flat(), s = computeStats(all);
+  const days = Object.entries(byDay).map(([d, a]) => ({ d, pnl: a.reduce((x, t) => x + t.pnl, 0) }));
+  const best = days.length ? days.reduce((a, b) => b.pnl > a.pnl ? b : a) : null, worst = days.length ? days.reduce((a, b) => b.pnl < a.pnl ? b : a) : null;
+  const lbl = d => d ? new Date(d.d + 'T00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' }) : '';
+  const card = (k, v, cls = '') => `<div class="stat"><div class="k">${k}</div><div class="v ${cls}">${v}</div></div>`;
+  $('#calStats').innerHTML = card('Total trades', s.n) + card('P&L', money(s.net), sgn(s.net)) +
+    card(`Best day ${lbl(best)}`, best ? money(best.pnl) : '–', best ? sgn(best.pnl) : '') +
+    card(`Worst day ${lbl(worst)}`, worst ? money(worst.pnl) : '–', worst ? sgn(worst.pnl) : '') +
+    card('Win rate', s.n ? (s.winRate * 100).toFixed(2) + '%' : '–');
+  const first = new Date(calY, calM, 1), lead = (first.getDay() + 6) % 7, start = new Date(calY, calM, 1 - lead);
+  const total = Math.ceil((lead + new Date(calY, calM + 1, 0).getDate()) / 7) * 7, today = ymd(now0.getFullYear(), now0.getMonth(), now0.getDate());
+  let h = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => `<div class="dow">${d}</div>`).join('');
+  for (let i = 0; i < total; i++) {
+    const dt = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i), key = ymd(dt.getFullYear(), dt.getMonth(), dt.getDate());
+    const a = byDay[key], pnl = a ? a.reduce((x, t) => x + t.pnl, 0) : 0;
+    h += `<div class="day ${dt.getMonth() !== calM ? 'out' : ''} ${key === today ? 'today' : ''} ${a ? (pnl > 0 ? 'win' : pnl < 0 ? 'loss' : '') : ''}" data-date="${key}" data-n="${a ? a.length : 0}" tabindex="0"><span class="dn">${pad(dt.getDate())}</span>${a ? `<span class="dp ${sgn(pnl)}">${money(pnl)}</span><span class="dt">${a.length} trade${a.length > 1 ? 's' : ''}</span>` : ''}</div>`;
+  }
+  $('#cal').innerHTML = h;
+}
+const calMove = d => { const t = new Date(calY, calM + d, 1); calY = t.getFullYear(); calM = t.getMonth(); renderCalendar(); };
+$('#calPrev').onclick = () => calMove(-1);
+$('#calNext').onclick = () => calMove(1);
+$('#calToday').onclick = () => { calY = now0.getFullYear(); calM = now0.getMonth(); renderCalendar(); };
+$('#cal').addEventListener('click', e => {
+  const d = e.target.closest('.day'); if (!d) return;
+  if (+d.dataset.n) { $('#search').value = d.dataset.date; $('#fResult').value = ''; $('#fDir').value = ''; renderList(); show('journal'); }
+  else openForm(null, d.dataset.date);
+});
+$('#cal').addEventListener('keydown', e => { if (e.key === 'Enter') e.target.click?.(); });
+
+function renderAll() { renderCalendar(); renderStats(); renderEquity(); renderAdherence(); renderEmotionBars('#emoEntry', 'emoEntry'); renderEmotionBars('#emoExit', 'emoExit'); renderLessons(); renderList(); }
 
 // ---- form ----
 const dlg = $('#dlg'), form = $('#form');
@@ -150,11 +189,11 @@ function setRating(n) {
 }
 $('#rating').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setRating(+b.dataset.n === rating ? 0 : +b.dataset.n); });
 
-function openForm(t) {
+function openForm(t, date) {
   form.reset();
   const f = form.elements;
   f.id.value = t?.id || '';
-  f.date.value = t?.date || new Date().toISOString().slice(0, 10);
+  f.date.value = t?.date || date || ymd(now0.getFullYear(), now0.getMonth(), now0.getDate());
   if (t) for (const k of ['instrument', 'direction', 'size', 'entry', 'exit', 'stop', 'target', 'trail', 'pnl', 'signal', 'emoEntry', 'emoLoser', 'emoWinner', 'emoExit', 'emoNotes', 'better', 'learned']) f[k].value = t[k] ?? '';
   setRating(t?.plan || 0);
   $('#dlgTitle').textContent = t ? 'Edit trade' : 'New trade';
