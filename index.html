@@ -17,6 +17,7 @@
     <button class="tab" data-view="journal">Journal</button>
     <button class="tab" data-view="settings">Data</button>
   </nav>
+  <button class="btn" id="acctBtn" title="Account &amp; sync">Sign in</button>
   <button class="btn primary" id="newTradeBtn">+ New trade</button>
 </header>
 
@@ -62,7 +63,7 @@
   <section id="view-settings" class="view">
     <div class="card">
       <h2>Your data</h2>
-      <p class="muted">Everything is stored in this browser only (localStorage). Nothing is uploaded. Export a backup regularly.</p>
+      <p class="muted">Signed out, data is stored in this browser only (localStorage). Signed in, it syncs to your private cloud account and is cached on this device for offline use. Export a backup now and then either way.</p>
       <div class="row">
         <button class="btn" id="exportJson">Export JSON</button>
         <button class="btn" id="exportCsv">Export CSV</button>
@@ -139,7 +140,26 @@
   </form>
 </dialog>
 
+<dialog id="authDlg" class="small-dlg">
+  <form id="authForm" method="dialog">
+    <div class="dlg-head"><h2>Account &amp; sync</h2><button type="button" class="x" id="authClose" aria-label="Close">&times;</button></div>
+    <div id="authOut">
+      <p class="muted small">Sign in to keep one journal on your phone, laptop and the APK. It also works offline and syncs when you reconnect.</p>
+      <label>Email<input type="email" id="authEmail" autocomplete="username" required></label>
+      <label>Password<input type="password" id="authPass" autocomplete="current-password" minlength="6" required></label>
+      <div class="row"><button type="submit" class="btn primary">Sign in</button><button type="button" class="btn" id="authSignUp">Create account</button><button type="button" class="btn" id="authReset">Forgot password</button></div>
+    </div>
+    <div id="authIn" hidden>
+      <p>Signed in as <b id="authWho"></b></p>
+      <p class="muted small" id="authSync"></p>
+      <div class="row"><button type="button" class="btn danger" id="authSignOut">Sign out</button></div>
+    </div>
+    <p id="authMsg" class="small" role="status"></p>
+  </form>
+</dialog>
+
 <div id="toast" role="status"></div>
+<script src="cloud.bundle.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

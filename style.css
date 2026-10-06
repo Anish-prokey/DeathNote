@@ -95,3 +95,9 @@ label>input,label>select,label>textarea{margin-top:3px;color:var(--ink)}
 @media (max-width:760px){.cal .day{min-height:64px;padding:4px}.cal .day .dp{font-size:11px;margin-top:2px}.cal .day .dt{display:none}.cal .dow{padding:6px 2px;text-align:center}}
 .cal>*{min-width:0}
 @media (max-width:760px){.cal-head{gap:6px}.cal-head h2{min-width:0;flex:1;font-size:16px;margin:0}}
+
+.small-dlg{width:min(420px,96vw)}
+.small-dlg form{padding:18px 20px}
+#acctBtn[data-s="Synced"]{color:var(--win)}
+#acctBtn[data-s="Offline"],#acctBtn[data-s="Error"]{color:var(--loss)}
+@media (max-width:760px){#acctBtn{padding:8px 10px}}

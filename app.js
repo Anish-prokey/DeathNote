@@ -10,15 +10,40 @@ const num = v => (v === '' || v == null || isNaN(+v)) ? null : +v;
 const money = n => (n < 0 ? '-' : '') + Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: Math.abs(n) < 100 ? 2 : 0 });
 const sgn = n => n > 0 ? 'pos' : n < 0 ? 'neg' : '';
 
-let trades = load();
+const cloudLib = window.TJCloudLib && window.TJCloudLib.TJCloud;
+const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch {} };
+let uid = cloudLib ? lsGet('tj.lastUid') : null;   // last signed-in user, so their cached journal shows instantly
+let cloudUser = null, unsub = null, syncState = 'Offline', syncErr = '';
+const storeKey = () => uid ? 'tj.cloud.' + uid : KEY;
+let trades = load(storeKey());
 let rating = 0;
 const now0 = new Date();
 let calY = now0.getFullYear(), calM = now0.getMonth();
 const pad = n => String(n).padStart(2, '0');
 const ymd = (y, m, d) => `${y}-${pad(m + 1)}-${pad(d)}`;
 
-function load() { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; } }
-function save() { try { localStorage.setItem(KEY, JSON.stringify(trades)); } catch { toast('Could not save (storage blocked)'); } }
+function load(k) { try { return JSON.parse(localStorage.getItem(k)) || []; } catch { return []; } }
+function save() { try { localStorage.setItem(storeKey(), JSON.stringify(trades)); } catch { toast('Could not save (storage blocked)'); } }
+function syncFail(e) {
+  syncErr = e && e.code === 'permission-denied' ? 'Cloud blocked this: publish firestore.rules in the Firebase console.' :
+    /not been used in project/.test(e && e.message) ? 'Firestore is not enabled yet in the Firebase console.' : (e && e.message) || 'Sync problem';
+  toast(syncErr); updateAcct();
+}
+// All writes go through these. Signed in: Firestore (its snapshot updates `trades`). Signed out: this browser only.
+function writable() { if (uid && !cloudUser) { toast('Reconnecting to your account… try again in a moment'); return false; } return true; }
+function upsertTrades(list) {
+  if (!writable()) return false;
+  if (cloudUser) cloudLib.saveMany(list).catch(syncFail);
+  else { list.forEach(t => { const i = trades.findIndex(x => x.id === t.id); i >= 0 ? trades[i] = t : trades.push(t); }); save(); renderAll(); }
+  return true;
+}
+function removeTrades(ids) {
+  if (!writable()) return false;
+  if (cloudUser) cloudLib.removeMany(ids).catch(syncFail);
+  else { trades = trades.filter(t => !ids.includes(t.id)); save(); renderAll(); }
+  return true;
+}
 function toast(m) { const t = $('#toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2200); }
 
 // ---- derived values ----
@@ -213,13 +238,11 @@ form.addEventListener('submit', e => {
     emoNotes: f.emoNotes.value.trim(), plan: rating || null, better: f.better.value.trim(), learned: f.learned.value.trim(),
   };
   if (t.pnl == null) { const a = autoPnl(t); t.pnl = a == null ? null : +a.toFixed(2); }
-  const i = trades.findIndex(x => x.id === t.id);
-  i >= 0 ? trades[i] = t : trades.push(t);
-  save(); renderAll(); dlg.close(); toast('Trade saved');
+  if (upsertTrades([t])) { dlg.close(); toast('Trade saved'); }
 });
 $('#newTradeBtn').onclick = () => openForm();
 $('#cancelBtn').onclick = $('#closeDlg').onclick = () => dlg.close();
-$('#delBtn').onclick = () => { if (confirm('Delete this trade?')) { trades = trades.filter(t => t.id !== form.elements.id.value); save(); renderAll(); dlg.close(); toast('Deleted'); } };
+$('#delBtn').onclick = () => { if (confirm('Delete this trade?') && removeTrades([form.elements.id.value])) { dlg.close(); toast('Deleted'); } };
 dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
 $('#list').addEventListener('click', e => { const a = e.target.closest('.trade'); if (a) openForm(trades.find(t => t.id === a.dataset.id)); });
 $('#list').addEventListener('keydown', e => { if (e.key === 'Enter') e.target.click?.(); });
@@ -242,21 +265,21 @@ $('#importFile').onchange = async e => {
   try {
     const data = JSON.parse(await file.text());
     if (!Array.isArray(data)) throw 0;
-    const have = new Set(trades.map(t => t.id)); let add = 0;
-    data.forEach(t => { if (t && t.id && t.date && t.instrument && !have.has(t.id)) { trades.push(t); add++; } });
-    save(); renderAll(); toast(`Imported ${add} trades`);
+    const have = new Set(trades.map(t => t.id));
+    const fresh = data.filter(t => t && t.id && t.date && t.instrument && !have.has(t.id));
+    if (upsertTrades(fresh)) toast(`Imported ${fresh.length} trades`);
   } catch { toast('Not a valid journal file'); }
   e.target.value = '';
 };
-$('#wipe').onclick = () => { if (confirm('Delete ALL trades? Export a backup first.')) { trades = []; save(); renderAll(); toast('All data deleted'); } };
+$('#wipe').onclick = () => { if (confirm(cloudUser ? 'Delete ALL trades from your cloud account (every device)? Export a backup first.' : 'Delete ALL trades? Export a backup first.') && removeTrades(trades.map(t => t.id))) toast('All data deleted'); };
 $('#loadDemo').onclick = () => {
   if (trades.length && !confirm('Add demo trades to your existing journal?')) return;
   const rnd = (() => { let s = 7; return () => (s = (s * 16807) % 2147483647) / 2147483647; })();
-  const syms = ['XAUUSD', 'EURUSD', 'USDJPY', 'NIFTY'], today = Date.now();
+  const syms = ['XAUUSD', 'EURUSD', 'USDJPY', 'NIFTY'], today = Date.now(), demo = [];
   for (let i = 0; i < 24; i++) {
     const plan = 1 + Math.floor(rnd() * 5), win = rnd() < 0.3 + plan * 0.08, r = win ? 1 + rnd() * 2 : -(0.6 + rnd() * 0.6);
     const dir = rnd() < .6 ? 'long' : 'short', entry = 100, risk = 2, d = dir === 'long' ? 1 : -1;
-    trades.push({
+    demo.push({
       id: 'demo' + i + today, created: today + i, date: new Date(today - (24 - i) * 86400000 * 1.5).toISOString().slice(0, 10),
       instrument: syms[i % 4], direction: dir, size: 1, entry, stop: entry - d * risk, target: entry + d * risk * 2, exit: +(entry + d * risk * r).toFixed(2), trail: i % 3 ? '' : 'Trail 1R under swing',
       pnl: +(r * 100).toFixed(2), signal: win ? 'H1 EMA bounce with LTF break of structure' : 'Early entry before confirmation',
@@ -264,8 +287,63 @@ $('#loadDemo').onclick = () => {
       plan, better: plan < 4 ? 'Wait for confirmation candle' : '', learned: plan < 3 ? 'Off-plan trades cost me. Skip when unsure.' : '',
     });
   }
-  save(); renderAll(); toast('Demo data loaded');
+  if (upsertTrades(demo)) toast('Demo data loaded');
 };
 
+// ---- account / sync ----
+const AUTH_ERR = {
+  'auth/invalid-credential': 'Wrong email or password.', 'auth/wrong-password': 'Wrong email or password.', 'auth/user-not-found': 'Wrong email or password.',
+  'auth/email-already-in-use': 'That email already has an account. Use Sign in.', 'auth/weak-password': 'Password needs at least 6 characters.',
+  'auth/invalid-email': 'That email address looks wrong.', 'auth/network-request-failed': 'No connection. Try again when online.',
+  'auth/too-many-requests': 'Too many attempts. Wait a bit and retry.', 'auth/operation-not-allowed': 'Email/password sign-in is not enabled in the Firebase console.',
+  'auth/configuration-not-found': 'Authentication is not set up: Firebase console > Authentication > Get started > Email/Password > Enable.', 'auth/missing-password': 'Enter your password.', 'auth/missing-email': 'Enter your email.',
+};
+const authDlg = $('#authDlg'), authMsg = $('#authMsg');
+function updateAcct() {
+  const b = $('#acctBtn');
+  if (!cloudLib) { b.hidden = true; return; }
+  if (!uid) { b.textContent = 'Sign in'; b.dataset.s = ''; }
+  else { const s = !navigator.onLine ? 'Offline' : syncErr ? 'Error' : syncState; b.textContent = '☁ ' + s; b.dataset.s = s; }
+  $('#authOut').hidden = !!uid; $('#authIn').hidden = !uid;
+  $('#authWho').textContent = cloudUser ? cloudUser.email : '';
+  $('#authSync').textContent = !uid ? '' : syncErr || (!navigator.onLine ? 'Offline: changes are saved on this device and will sync when you reconnect.' : syncState === 'Synced' ? 'All changes synced.' : 'Syncing…');
+}
+function say(m, bad = true) { authMsg.textContent = m; authMsg.className = 'small ' + (bad ? 'neg' : 'pos'); }
+async function doAuth(kind) {
+  const e = $('#authEmail').value.trim(), p = $('#authPass').value;
+  say('Working…', false);
+  try { await cloudLib[kind](e, p); authMsg.textContent = ''; $('#authPass').value = ''; authDlg.close(); toast(kind === 'signUp' ? 'Account created' : 'Signed in'); }
+  catch (err) { say(AUTH_ERR[err.code] || err.message); }
+}
+function onSnap(list, meta) {
+  syncErr = ''; syncState = meta.pending ? 'Syncing…' : meta.fromCache && navigator.onLine ? 'Connecting…' : 'Synced';
+  trades = list; save(); renderAll(); updateAcct();
+}
+function offerMigration(u) {
+  const local = load(KEY), flag = 'tj.migrated.' + u.uid;
+  if (!local.length || lsGet(flag)) return;
+  setTimeout(() => {
+    if (!confirm(`Upload the ${local.length} trade(s) saved on this device to ${u.email}?`)) { lsSet(flag, '1'); return; }
+    cloudLib.saveMany(local).then(() => { lsSet(flag, '1'); toast('Uploaded to your account'); }).catch(syncFail);
+  }, 700);
+}
+if (cloudLib) {
+  $('#acctBtn').onclick = () => { say('', false); updateAcct(); authDlg.showModal(); };
+  $('#authClose').onclick = () => authDlg.close();
+  authDlg.addEventListener('click', e => { if (e.target === authDlg) authDlg.close(); });
+  $('#authForm').addEventListener('submit', e => { e.preventDefault(); doAuth('signIn'); });
+  $('#authSignUp').onclick = () => doAuth('signUp');
+  $('#authReset').onclick = async () => { const e = $('#authEmail').value.trim(); if (!e) return say('Enter your email first.'); try { await cloudLib.reset(e); say('Password reset email sent.', false); } catch (err) { say(AUTH_ERR[err.code] || err.message); } };
+  $('#authSignOut').onclick = async () => { await cloudLib.signOut(); authDlg.close(); toast('Signed out'); };
+  window.addEventListener('online', updateAcct); window.addEventListener('offline', updateAcct);
+  cloudLib.onAuth(u => {
+    if (unsub) { unsub(); unsub = null; }
+    cloudUser = u; syncErr = ''; syncState = 'Connecting…';
+    if (u) { uid = u.uid; lsSet('tj.lastUid', uid); trades = load(storeKey()); renderAll(); unsub = cloudLib.subscribe(onSnap, syncFail); offerMigration(u); }
+    else { uid = null; lsSet('tj.lastUid', null); trades = load(KEY); renderAll(); }
+    updateAcct();
+  });
+}
+updateAcct();
 renderAll();
 })();
