@@ -87,6 +87,7 @@
 </main>
 
 <!-- TRADE FORM -->
+<datalist id="instrList"><option value="EURUSD"><option value="GBPUSD"><option value="USDJPY"><option value="USDCHF"><option value="USDCAD"><option value="AUDUSD"><option value="NZDUSD"><option value="EURGBP"><option value="EURJPY"><option value="GBPJPY"><option value="AUDJPY"><option value="EURCHF"><option value="EURAUD"><option value="EURCAD"><option value="GBPCHF"><option value="GBPAUD"><option value="GBPCAD"><option value="AUDNZD"><option value="AUDCAD"><option value="NZDJPY"><option value="CADJPY"><option value="CHFJPY"><option value="XAUUSD"><option value="XAGUSD"><option value="US30"><option value="NAS100"><option value="SPX500"><option value="GER40"><option value="NIFTY"><option value="BANKNIFTY"><option value="BTCUSD"><option value="ETHUSD"><option value="USOIL"></datalist>
 <dialog id="dlg">
   <form id="form" method="dialog">
     <div class="dlg-head"><h2 id="dlgTitle">New trade</h2><button type="button" class="x" id="closeDlg" aria-label="Close">&times;</button></div>
@@ -96,15 +97,16 @@
       <legend>The trade</legend>
       <div class="fgrid">
         <label>Date<input type="date" name="date" required></label>
-        <label>Instrument<input name="instrument" placeholder="XAUUSD, EURUSD, RELIANCE…" required></label>
+        <label>Instrument<input name="instrument" list="instrList" autocomplete="off" placeholder="Pick or type: XAUUSD, EURUSD, NIFTY…" required></label>
         <label>Direction<select name="direction"><option value="long">Long</option><option value="short">Short</option></select></label>
-        <label>Size (lots for FX &amp; gold, else units)<input type="number" step="any" name="size" placeholder="1"></label>
+        <label>Size <span id="sizeUnit" class="small"></span><input type="number" step="any" name="size" placeholder="1"></label>
         <label>Entry price<input type="number" step="any" name="entry" required></label>
         <label>Exit price<input type="number" step="any" name="exit"></label>
         <label>Stop loss<input type="number" step="any" name="stop"></label>
         <label>Profit target<input type="number" step="any" name="target"></label>
         <label>Trailing stop<input name="trail" placeholder="e.g. trail 1R below swing lows, or none"></label>
         <label>Result P&amp;L (money)<input type="number" step="any" name="pnl" placeholder="auto from prices if empty"></label>
+        <label id="fxWrap" hidden><span id="fxLabel"></span><input type="number" step="any" name="fxRate" placeholder="e.g. 1.27"></label>
       </div>
       <label>Entry signal / setup<textarea name="signal" rows="2" placeholder="What exactly triggered the entry?"></textarea></label>
     </fieldset>

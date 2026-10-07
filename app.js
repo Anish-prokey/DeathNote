@@ -47,25 +47,28 @@ function removeTrades(ids) {
 function toast(m) { const t = $('#toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2200); }
 
 // ---- derived values ----
-// Auto P&L in account currency (assumed USD). FX and gold sizes are LOTS; everything else is units/shares.
-// FX crosses (EURGBP, GBPJPY...) need a conversion rate we don't have, so they return null: type the P&L yourself.
+// Auto P&L in account currency (assumed USD). FX and metals sizes are LOTS; everything else is units/shares.
+// FX crosses need a rate to convert the quote currency to USD: the form asks for it (t.fxRate).
+const CCY = ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD'], USD_BASE = ['JPY', 'CHF', 'CAD'];
 function contract(instr) {
   const s = String(instr || '').toUpperCase().replace(/[^A-Z]/g, '');
-  if (s === 'XAUUSD') return { mult: 100 };
-  if (s === 'XAGUSD') return { mult: 5000 };
-  if (/^[A-Z]{6}$/.test(s) && /USD|EUR|GBP|JPY|CHF|CAD|AUD|NZD/.test(s.slice(0, 3)) && /USD|EUR|GBP|JPY|CHF|CAD|AUD|NZD/.test(s.slice(3))) {
-    if (s.endsWith('USD')) return { mult: 100000 };
-    if (s.startsWith('USD')) return { mult: 100000, perExit: true };   // quote currency -> USD at the exit price
-    return null;
+  if (s === 'XAUUSD') return { mult: 100, unit: 'lots · 1 lot = 100 oz' };
+  if (s === 'XAGUSD') return { mult: 5000, unit: 'lots · 1 lot = 5,000 oz' };
+  if (/^[A-Z]{6}$/.test(s) && CCY.includes(s.slice(0, 3)) && CCY.includes(s.slice(3))) {
+    const base = s.slice(0, 3), quote = s.slice(3), c = { mult: 100000, unit: 'lots · 1 lot = 100,000' };
+    if (quote === 'USD') return c;
+    if (base === 'USD') return { ...c, perExit: true };   // quote currency -> USD at the exit price
+    return { ...c, cross: true, quote };
   }
-  return { mult: 1 };
+  return { mult: 1, unit: 'units / shares' };
 }
 function autoPnl(t) {
   if (t.entry == null || t.exit == null) return null;
-  const c = contract(t.instrument); if (!c) return null;
-  const d = t.direction === 'short' ? -1 : 1;
-  const raw = (t.exit - t.entry) * d * (t.size ?? 1) * c.mult;
-  return c.perExit ? raw / t.exit : raw;
+  const c = contract(t.instrument);
+  const raw = (t.exit - t.entry) * (t.direction === 'short' ? -1 : 1) * (t.size ?? 1) * c.mult;
+  if (c.perExit) return raw / t.exit;
+  if (c.cross) return t.fxRate ? (USD_BASE.includes(c.quote) ? raw / t.fxRate : raw * t.fxRate) : null;
+  return raw;
 }
 function rMultiple(t) {
   if (t.entry == null || t.exit == null || t.stop == null) return null;
@@ -234,8 +237,9 @@ function openForm(t, date) {
   const f = form.elements;
   f.id.value = t?.id || '';
   f.date.value = t?.date || date || ymd(now0.getFullYear(), now0.getMonth(), now0.getDate());
-  if (t) for (const k of ['instrument', 'direction', 'size', 'entry', 'exit', 'stop', 'target', 'trail', 'pnl', 'signal', 'emoEntry', 'emoLoser', 'emoWinner', 'emoExit', 'emoNotes', 'better', 'learned']) f[k].value = t[k] ?? '';
+  if (t) for (const k of ['instrument', 'direction', 'size', 'entry', 'exit', 'stop', 'target', 'trail', 'pnl', 'fxRate', 'signal', 'emoEntry', 'emoLoser', 'emoWinner', 'emoExit', 'emoNotes', 'better', 'learned']) f[k].value = t[k] ?? '';
   setRating(t?.plan || 0);
+  updateInstr();
   $('#dlgTitle').textContent = t ? 'Edit trade' : 'New trade';
   $('#delBtn').hidden = !t;
   dlg.showModal();
@@ -248,7 +252,7 @@ form.addEventListener('submit', e => {
     created: id ? (trades.find(x => x.id === id)?.created ?? Date.now()) : Date.now(),
     date: f.date.value, instrument: f.instrument.value.trim().toUpperCase(), direction: f.direction.value,
     size: num(f.size.value), entry: num(f.entry.value), exit: num(f.exit.value), stop: num(f.stop.value), target: num(f.target.value),
-    trail: f.trail.value.trim(), pnl: num(f.pnl.value), signal: f.signal.value.trim(),
+    trail: f.trail.value.trim(), pnl: num(f.pnl.value), fxRate: contract(f.instrument.value.trim()).cross ? num(f.fxRate.value) : null, signal: f.signal.value.trim(),
     emoEntry: f.emoEntry.value, emoLoser: f.emoLoser.value, emoWinner: f.emoWinner.value, emoExit: f.emoExit.value,
     emoNotes: f.emoNotes.value.trim(), plan: rating || null, better: f.better.value.trim(), learned: f.learned.value.trim(),
   };
@@ -258,10 +262,15 @@ form.addEventListener('submit', e => {
   else { t.pnl = typed; t.pnlManual = typed != null; }
   if (upsertTrades([t])) { dlg.close(); toast('Trade saved'); }
 });
-form.addEventListener('input', () => {
-  const f = form.elements, p = autoPnl({ instrument: f.instrument.value, entry: num(f.entry.value), exit: num(f.exit.value), size: num(f.size.value), direction: f.direction.value });
-  f.pnl.placeholder = p == null ? (f.exit.value && contract(f.instrument.value) === null ? 'cross pair: enter P&L yourself' : 'auto from entry & exit') : 'auto: ' + +p.toFixed(2);
-});
+function updateInstr() {
+  const f = form.elements, c = contract(f.instrument.value);
+  $('#sizeUnit').textContent = '(' + c.unit + ')';
+  $('#fxWrap').hidden = !c.cross;
+  if (c.cross) $('#fxLabel').textContent = USD_BASE.includes(c.quote) ? `USD${c.quote} rate (${c.quote} per 1 USD) to convert P&L` : `${c.quote}USD rate (USD per 1 ${c.quote}) to convert P&L`;
+  const p = autoPnl({ instrument: f.instrument.value, entry: num(f.entry.value), exit: num(f.exit.value), size: num(f.size.value), direction: f.direction.value, fxRate: num(f.fxRate.value) });
+  f.pnl.placeholder = p != null ? 'auto: ' + +p.toFixed(2) : c.cross && f.exit.value ? 'enter the rate above' : 'auto from entry & exit';
+}
+form.addEventListener('input', updateInstr);
 $('#newTradeBtn').onclick = () => openForm();
 $('#cancelBtn').onclick = $('#closeDlg').onclick = () => dlg.close();
 $('#delBtn').onclick = () => { if (confirm('Delete this trade?') && removeTrades([form.elements.id.value])) { dlg.close(); toast('Deleted'); } };
