@@ -47,10 +47,25 @@ function removeTrades(ids) {
 function toast(m) { const t = $('#toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2200); }
 
 // ---- derived values ----
+// Auto P&L in account currency (assumed USD). FX and gold sizes are LOTS; everything else is units/shares.
+// FX crosses (EURGBP, GBPJPY...) need a conversion rate we don't have, so they return null: type the P&L yourself.
+function contract(instr) {
+  const s = String(instr || '').toUpperCase().replace(/[^A-Z]/g, '');
+  if (s === 'XAUUSD') return { mult: 100 };
+  if (s === 'XAGUSD') return { mult: 5000 };
+  if (/^[A-Z]{6}$/.test(s) && /USD|EUR|GBP|JPY|CHF|CAD|AUD|NZD/.test(s.slice(0, 3)) && /USD|EUR|GBP|JPY|CHF|CAD|AUD|NZD/.test(s.slice(3))) {
+    if (s.endsWith('USD')) return { mult: 100000 };
+    if (s.startsWith('USD')) return { mult: 100000, perExit: true };   // quote currency -> USD at the exit price
+    return null;
+  }
+  return { mult: 1 };
+}
 function autoPnl(t) {
   if (t.entry == null || t.exit == null) return null;
+  const c = contract(t.instrument); if (!c) return null;
   const d = t.direction === 'short' ? -1 : 1;
-  return (t.exit - t.entry) * d * (t.size ?? 1);
+  const raw = (t.exit - t.entry) * d * (t.size ?? 1) * c.mult;
+  return c.perExit ? raw / t.exit : raw;
 }
 function rMultiple(t) {
   if (t.entry == null || t.exit == null || t.stop == null) return null;
@@ -244,8 +259,8 @@ form.addEventListener('submit', e => {
   if (upsertTrades([t])) { dlg.close(); toast('Trade saved'); }
 });
 form.addEventListener('input', () => {
-  const f = form.elements, p = autoPnl({ entry: num(f.entry.value), exit: num(f.exit.value), size: num(f.size.value), direction: f.direction.value });
-  f.pnl.placeholder = p == null ? 'auto from entry & exit' : 'auto: ' + +p.toFixed(2);
+  const f = form.elements, p = autoPnl({ instrument: f.instrument.value, entry: num(f.entry.value), exit: num(f.exit.value), size: num(f.size.value), direction: f.direction.value });
+  f.pnl.placeholder = p == null ? (f.exit.value && contract(f.instrument.value) === null ? 'cross pair: enter P&L yourself' : 'auto from entry & exit') : 'auto: ' + +p.toFixed(2);
 });
 $('#newTradeBtn').onclick = () => openForm();
 $('#cancelBtn').onclick = $('#closeDlg').onclick = () => dlg.close();
