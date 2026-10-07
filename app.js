@@ -237,8 +237,15 @@ form.addEventListener('submit', e => {
     emoEntry: f.emoEntry.value, emoLoser: f.emoLoser.value, emoWinner: f.emoWinner.value, emoExit: f.emoExit.value,
     emoNotes: f.emoNotes.value.trim(), plan: rating || null, better: f.better.value.trim(), learned: f.learned.value.trim(),
   };
-  if (t.pnl == null) { const a = autoPnl(t); t.pnl = a == null ? null : +a.toFixed(2); }
+  // P&L follows the prices unless you typed your own number (pnlManual). Editing prices on an auto trade recomputes it.
+  const prev = trades.find(x => x.id === t.id), auto = autoPnl(t), typed = num(f.pnl.value);
+  if (auto != null && (typed == null || (prev && !prev.pnlManual && typed === prev.pnl))) { t.pnl = +auto.toFixed(2); t.pnlManual = false; }
+  else { t.pnl = typed; t.pnlManual = typed != null; }
   if (upsertTrades([t])) { dlg.close(); toast('Trade saved'); }
+});
+form.addEventListener('input', () => {
+  const f = form.elements, p = autoPnl({ entry: num(f.entry.value), exit: num(f.exit.value), size: num(f.size.value), direction: f.direction.value });
+  f.pnl.placeholder = p == null ? 'auto from entry & exit' : 'auto: ' + +p.toFixed(2);
 });
 $('#newTradeBtn').onclick = () => openForm();
 $('#cancelBtn').onclick = $('#closeDlg').onclick = () => dlg.close();
