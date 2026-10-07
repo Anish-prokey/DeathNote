@@ -27,3 +27,10 @@ npm run bundle      # rebuild cloud.bundle.js after editing src/cloud.js (commit
 npm run serve       # http://localhost:8080
 npm run apk         # builds TradingJournal-debug.apk (needs JDK 21 + Android SDK, same as emcinemara)
 ```
+
+## Hosting (Firebase Hosting, free, works with a private repo)
+```
+npx firebase-tools login      # once, opens your browser
+npm run deploy                # bundles, builds www/, deploys site + Firestore rules
+```
+Live at https://deathnote-5a3b5.web.app
