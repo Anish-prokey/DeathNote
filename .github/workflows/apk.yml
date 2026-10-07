@@ -1,0 +1,37 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - run: npm ci
+      - run: npm run bundle
+      - run: npm run build:www
+      - run: npx cap sync android
+      - name: Build debug APK
+        working-directory: android
+        run: chmod +x gradlew && ./gradlew assembleDebug --console=plain
+      - name: Publish release "latest"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk TradingJournal.apk
+          gh release delete latest --cleanup-tag --yes || true
+          gh release create latest TradingJournal.apk --target "$GITHUB_SHA" --title "Trading Journal APK (build ${{ github.run_number }})" --notes "Debug APK built from commit ${GITHUB_SHA::7}. Download TradingJournal.apk on your phone and install it over the old version."
