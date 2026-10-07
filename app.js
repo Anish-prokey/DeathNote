@@ -40,9 +40,66 @@ function upsertTrades(list) {
 }
 function removeTrades(ids) {
   if (!writable()) return false;
+  ids.forEach(id => shotCache.delete(id));
   if (cloudUser) cloudLib.removeMany(ids).catch(syncFail);
-  else { trades = trades.filter(t => !ids.includes(t.id)); save(); renderAll(); }
+  else { trades = trades.filter(t => !ids.includes(t.id)); const m = localShots(); ids.forEach(id => delete m[id]); try { localStorage.setItem(SHOTS_KEY, JSON.stringify(m)); } catch {} save(); renderAll(); }
   return true;
+}
+
+// ---- screenshots: separate store (Firestore `shots` docs when signed in, localStorage when not) ----
+const SHOTS_KEY = 'tj.shots.v1', MAX_SHOTS = 4, MAX_CHARS = 230000, shotCache = new Map();
+function localShots() { try { return JSON.parse(localStorage.getItem(SHOTS_KEY)) || {}; } catch { return {}; } }
+async function getShots(id) {
+  if (shotCache.has(id)) return shotCache.get(id);
+  try { const v = cloudUser ? await cloudLib.getShots(id) : (localShots()[id] || []); shotCache.set(id, v); return v; } catch { return []; }
+}
+function putShots(id, arr) {
+  shotCache.set(id, arr);
+  if (cloudUser) return cloudLib.saveShots(id, arr).catch(syncFail);
+  const m = localShots(); arr.length ? m[id] = arr : delete m[id];
+  try { localStorage.setItem(SHOTS_KEY, JSON.stringify(m)); } catch { toast('Browser storage is full. Sign in to keep images in the cloud.'); }
+}
+async function compress(file) {
+  const bmp = await createImageBitmap(file);
+  let max = 1280, q = 0.72, out = '';
+  for (let i = 0; i < 10; i++) {
+    const s = Math.min(1, max / Math.max(bmp.width, bmp.height)), cv = document.createElement('canvas');
+    cv.width = Math.round(bmp.width * s); cv.height = Math.round(bmp.height * s);
+    const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(bmp, 0, 0, cv.width, cv.height);
+    out = cv.toDataURL('image/jpeg', q);
+    if (out.length <= MAX_CHARS) break;
+    if (q > 0.5) q -= 0.1; else max *= 0.8;
+  }
+  bmp.close && bmp.close();
+  return out;
+}
+let pendingShots = [], shotsDirty = false, shotsLoaded = true;
+function renderShotGrid() {
+  const g = $('#shotGrid'); g.innerHTML = '';
+  pendingShots.forEach((src, i) => {
+    const w = document.createElement('div'); w.className = 'sh';
+    const im = document.createElement('img'); im.src = src; im.alt = 'screenshot ' + (i + 1); im.onclick = () => openLightbox(src);
+    const x = document.createElement('button'); x.type = 'button'; x.className = 'rm'; x.textContent = '×'; x.title = 'Remove'; x.onclick = () => { pendingShots.splice(i, 1); shotsDirty = true; renderShotGrid(); };
+    w.append(im, x); g.append(w);
+  });
+  $('#shotAdd').hidden = pendingShots.length >= MAX_SHOTS;
+}
+async function addFiles(files) {
+  const imgs = [...files].filter(f => f.type.startsWith('image/'));
+  if (!imgs.length) return;
+  if (!shotsLoaded) return toast('Still loading this trade’s images…');
+  for (const f of imgs) {
+    if (pendingShots.length >= MAX_SHOTS) { toast(`Max ${MAX_SHOTS} images per trade`); break; }
+    try { pendingShots.push(await compress(f)); shotsDirty = true; } catch { toast('Could not read that image'); }
+  }
+  renderShotGrid();
+}
+function openLightbox(src) { $('#lbImg').src = src; $('#lightbox').showModal(); }
+function hydrateThumbs() {
+  $$('.thumbs').forEach(async el => {
+    const arr = await getShots(el.dataset.id); el.textContent = '';
+    arr.forEach(src => { const im = document.createElement('img'); im.src = src; im.alt = 'chart'; im.onclick = e => { e.stopPropagation(); openLightbox(src); }; el.append(im); });
+  });
 }
 function toast(m) { const t = $('#toast'); t.textContent = m; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2200); }
 
@@ -177,11 +234,12 @@ function renderList() {
     const f = (k, v) => v ? `<div class="txt"><b>${k}:</b> ${esc(v)}</div>` : '';
     const lv = [['Entry', t.entry], ['Stop', t.stop], ['Target', t.target], ['Exit', t.exit]].filter(x => x[1] != null).map(x => `${x[0]} ${x[1]}`).join(' · ');
     const emo = [['entry', t.emoEntry], ['losers', t.emoLoser], ['winners', t.emoWinner], ['exit', t.emoExit]].filter(x => x[1]).map(x => `${x[1]} (${x[0]})`).join(', ');
-    return `<article class="trade ${result(t)}" data-id="${t.id}" tabindex="0">
-      <div class="h"><span class="sym">${esc(t.instrument)}</span><span class="tag ${t.direction}">${t.direction}</span><span class="muted small">${esc(t.date)}</span>${t.plan ? `<span class="tag">plan ${t.plan}/5</span>` : ''}${r != null ? `<span class="tag">${r.toFixed(2)}R</span>` : ''}<span class="pl ${sgn(pnl)}">${pnl == null ? 'open' : money(pnl)}</span></div>
+    return `<article class="trade ${result(t)}" data-id="${esc(t.id)}" tabindex="0">
+      <div class="h"><span class="sym">${esc(t.instrument)}</span><span class="tag ${t.direction}">${t.direction}</span><span class="muted small">${esc(t.date)}</span>${t.plan ? `<span class="tag">plan ${t.plan}/5</span>` : ''}${t.imgCount ? `<span class="tag">📷 ${t.imgCount}</span>` : ''}${r != null ? `<span class="tag">${r.toFixed(2)}R</span>` : ''}<span class="pl ${sgn(pnl)}">${pnl == null ? 'open' : money(pnl)}</span></div>
       <div class="meta">${esc(lv)}${t.trail ? ' · trail: ' + esc(t.trail) : ''}</div>
-      ${f('Signal', t.signal)}${emo ? `<div class="txt"><b>Emotions:</b> ${esc(emo)}${t.emoNotes ? ' — ' + esc(t.emoNotes) : ''}</div>` : ''}${f('Do better', t.better)}${f('Learned', t.learned)}</article>`;
+      ${f('Signal', t.signal)}${emo ? `<div class="txt"><b>Emotions:</b> ${esc(emo)}${t.emoNotes ? ' — ' + esc(t.emoNotes) : ''}</div>` : ''}${f('Do better', t.better)}${f('Learned', t.learned)}${t.imgCount ? `<div class="thumbs" data-id="${esc(t.id)}"></div>` : ''}</article>`;
   }).join('');
+  hydrateThumbs();
 }
 
 // ---- calendar ----
@@ -223,6 +281,14 @@ function renderAll() { renderCalendar(); renderStats(); renderEquity(); renderAd
 
 // ---- form ----
 const dlg = $('#dlg'), form = $('#form');
+
+// screenshots: lightbox, file picker, paste and drag-drop
+$('#lightbox').addEventListener('click', () => $('#lightbox').close());
+$('#shotFile').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
+dlg.addEventListener('paste', e => { const fs = [...(e.clipboardData?.files || [])]; if (fs.some(f => f.type.startsWith('image/'))) { e.preventDefault(); addFiles(fs); } });
+dlg.addEventListener('dragover', e => { e.preventDefault(); dlg.classList.add('drop'); });
+dlg.addEventListener('dragleave', () => dlg.classList.remove('drop'));
+dlg.addEventListener('drop', e => { e.preventDefault(); dlg.classList.remove('drop'); addFiles(e.dataTransfer.files); });
 $$('[data-emo]').forEach(s => s.innerHTML = EMOTIONS.map(e => `<option value="${e}">${e || '—'}</option>`).join(''));
 $('#rating').innerHTML = [1, 2, 3, 4, 5].map(n => `<button type="button" role="radio" data-n="${n}" aria-checked="false">${n}</button>`).join('');
 function setRating(n) {
@@ -239,6 +305,8 @@ function openForm(t, date) {
   f.date.value = t?.date || date || ymd(now0.getFullYear(), now0.getMonth(), now0.getDate());
   if (t) for (const k of ['instrument', 'direction', 'size', 'entry', 'exit', 'stop', 'target', 'trail', 'pnl', 'fxRate', 'signal', 'emoEntry', 'emoLoser', 'emoWinner', 'emoExit', 'emoNotes', 'better', 'learned']) f[k].value = t[k] ?? '';
   setRating(t?.plan || 0);
+  pendingShots = []; shotsDirty = false; shotsLoaded = !(t && t.imgCount); renderShotGrid();
+  if (t && t.imgCount) getShots(t.id).then(arr => { if (form.elements.id.value === t.id && !shotsDirty) { pendingShots = arr.slice(); shotsLoaded = true; renderShotGrid(); } });
   updateInstr();
   $('#dlgTitle').textContent = t ? 'Edit trade' : 'New trade';
   $('#delBtn').hidden = !t;
@@ -260,6 +328,8 @@ form.addEventListener('submit', e => {
   const prev = trades.find(x => x.id === t.id), auto = autoPnl(t), typed = num(f.pnl.value);
   if (auto != null && (typed == null || (prev && !prev.pnlManual && typed === prev.pnl))) { t.pnl = +auto.toFixed(2); t.pnlManual = false; }
   else { t.pnl = typed; t.pnlManual = typed != null; }
+  t.imgCount = shotsDirty ? pendingShots.length : (prev ? prev.imgCount || 0 : 0);
+  if (shotsDirty && writable()) putShots(t.id, pendingShots.slice());   // before upsert: the list re-renders (and reads the image cache) inside it
   if (upsertTrades([t])) { dlg.close(); toast('Trade saved'); }
 });
 function updateInstr() {
@@ -285,7 +355,11 @@ $$('.tab').forEach(b => b.onclick = () => show(b.dataset.view));
 
 // ---- data ----
 function download(name, text, type) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
-$('#exportJson').onclick = () => download('trading-journal.json', JSON.stringify(trades, null, 2), 'application/json');
+$('#exportJson').onclick = async () => {
+  const out = [];
+  for (const t of trades) out.push(t.imgCount ? { ...t, images: await getShots(t.id) } : t);
+  download('trading-journal.json', JSON.stringify(out, null, 2), 'application/json');
+};
 $('#exportCsv').onclick = () => {
   const cols = ['date', 'instrument', 'direction', 'size', 'entry', 'exit', 'stop', 'target', 'trail', 'pnl', 'signal', 'emoEntry', 'emoLoser', 'emoWinner', 'emoExit', 'emoNotes', 'plan', 'better', 'learned'];
   const cell = v => { v = v ?? ''; v = String(v); if (/^[=+\-@]/.test(v) && isNaN(+v)) v = "'" + v; return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
@@ -298,7 +372,12 @@ $('#importFile').onchange = async e => {
     if (!Array.isArray(data)) throw 0;
     const have = new Set(trades.map(t => t.id));
     const fresh = data.filter(t => t && t.id && t.date && t.instrument && !have.has(t.id));
-    if (upsertTrades(fresh)) toast(`Imported ${fresh.length} trades`);
+    const imgs = new Map();
+    fresh.forEach(t => {
+      const ok = Array.isArray(t.images) ? t.images.filter(x => typeof x === 'string' && x.startsWith('data:image/')).slice(0, MAX_SHOTS) : [];
+      delete t.images; t.imgCount = ok.length; if (ok.length) imgs.set(t.id, ok);
+    });
+    if (upsertTrades(fresh)) { imgs.forEach((v, id) => putShots(id, v)); toast(`Imported ${fresh.length} trades`); }
   } catch { toast('Not a valid journal file'); }
   e.target.value = '';
 };
@@ -355,7 +434,7 @@ function offerMigration(u) {
   if (!local.length || lsGet(flag)) return;
   setTimeout(() => {
     if (!confirm(`Upload the ${local.length} trade(s) saved on this device to ${u.email}?`)) { lsSet(flag, '1'); return; }
-    cloudLib.saveMany(local).then(() => { lsSet(flag, '1'); toast('Uploaded to your account'); }).catch(syncFail);
+    cloudLib.saveMany(local).then(() => { const m = localShots(); local.forEach(t => { if (m[t.id]) cloudLib.saveShots(t.id, m[t.id]).catch(syncFail); }); lsSet(flag, '1'); toast('Uploaded to your account'); }).catch(syncFail);
   }, 700);
 }
 if (cloudLib) {
@@ -369,7 +448,7 @@ if (cloudLib) {
   window.addEventListener('online', updateAcct); window.addEventListener('offline', updateAcct);
   cloudLib.onAuth(u => {
     if (unsub) { unsub(); unsub = null; }
-    cloudUser = u; syncErr = ''; syncState = 'Connecting…';
+    cloudUser = u; syncErr = ''; syncState = 'Connecting…'; shotCache.clear();
     if (u) { uid = u.uid; lsSet('tj.lastUid', uid); trades = load(storeKey()); renderAll(); unsub = cloudLib.subscribe(onSnap, syncFail); offerMigration(u); }
     else { uid = null; lsSet('tj.lastUid', null); trades = load(KEY); renderAll(); }
     updateAcct();

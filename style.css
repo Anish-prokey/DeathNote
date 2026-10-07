@@ -101,3 +101,14 @@ label>input,label>select,label>textarea{margin-top:3px;color:var(--ink)}
 #acctBtn[data-s="Synced"]{color:var(--win)}
 #acctBtn[data-s="Offline"],#acctBtn[data-s="Error"]{color:var(--loss)}
 @media (max-width:760px){#acctBtn{padding:8px 10px}}
+
+.shots{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.shots .sh{position:relative}
+.shots img{height:84px;width:auto;border-radius:8px;border:1px solid var(--line);display:block;cursor:zoom-in}
+.shots .rm{position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--loss);cursor:pointer;line-height:1;padding:0}
+#shotAdd{margin-right:8px}
+.thumbs{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.thumbs img{height:64px;width:auto;border-radius:6px;border:1px solid var(--line);cursor:zoom-in}
+#lightbox{background:transparent;border:0;width:auto;max-width:96vw;padding:0}
+#lightbox img{max-width:96vw;max-height:92vh;display:block;border-radius:10px;cursor:zoom-out}
+dialog.drop{outline:3px dashed var(--accent);outline-offset:-6px}

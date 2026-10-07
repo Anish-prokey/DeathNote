@@ -111,6 +111,13 @@
       <label>Entry signal / setup<textarea name="signal" rows="2" placeholder="What exactly triggered the entry?"></textarea></label>
     </fieldset>
 
+    <fieldset id="shotSet">
+      <legend>Screenshots</legend>
+      <div id="shotGrid" class="shots"></div>
+      <label class="btn" id="shotAdd">+ Add images<input type="file" id="shotFile" accept="image/*" multiple hidden></label>
+      <span class="muted small">or paste (Ctrl+V) / drop a chart screenshot anywhere in this window. Up to 4, compressed automatically.</span>
+    </fieldset>
+
     <fieldset>
       <legend>Emotions</legend>
       <div class="fgrid">
@@ -159,6 +166,8 @@
     <p id="authMsg" class="small" role="status"></p>
   </form>
 </dialog>
+
+<dialog id="lightbox"><img id="lbImg" alt="Trade screenshot"></dialog>
 
 <div id="toast" role="status"></div>
 <script src="cloud.bundle.js"></script>

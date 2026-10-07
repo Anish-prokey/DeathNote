@@ -8,5 +8,13 @@ service cloud.firestore {
         && request.resource.data.id == tradeId
         && request.resource.data.keys().size() < 40;
     }
+
+    // Chart screenshots (compressed data URLs), one doc per trade.
+    match /users/{uid}/shots/{tradeId} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.id == tradeId
+        && request.resource.data.images.size() <= 4;
+    }
   }
 }
