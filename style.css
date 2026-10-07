@@ -112,3 +112,6 @@ label>input,label>select,label>textarea{margin-top:3px;color:var(--ink)}
 #lightbox{background:transparent;border:0;width:auto;max-width:96vw;padding:0}
 #lightbox img{max-width:96vw;max-height:92vh;display:block;border-radius:10px;cursor:zoom-out}
 dialog.drop{outline:3px dashed var(--accent);outline-offset:-6px}
+
+/* author display rules (label{display:block}, .btn{display:inline-block}) must not defeat the hidden attribute */
+[hidden]{display:none !important}
