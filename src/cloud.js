@@ -24,6 +24,7 @@ const db = initializeFirestore(app, {
 });
 
 const col = () => collection(db, 'users', auth.currentUser.uid, 'trades');
+const acctCol = () => collection(db, 'users', auth.currentUser.uid, 'accounts');   // trading (prop firm) accounts
 const shotsCol = () => collection(db, 'users', auth.currentUser.uid, 'shots');   // images live apart from trades to keep the list light
 const chunks = (a, n) => Array.from({ length: Math.ceil(a.length / n) }, (_, i) => a.slice(i * n, i * n + n));
 
@@ -43,6 +44,9 @@ export const TJCloud = {
   remove: id => deleteDoc(doc(col(), id)),
   async saveMany(list) { for (const c of chunks(list, 400)) { const b = writeBatch(db); c.forEach(t => b.set(doc(col(), t.id), t)); await b.commit(); } },
   async removeMany(ids) { for (const c of chunks(ids, 200)) { const b = writeBatch(db); c.forEach(id => { b.delete(doc(col(), id)); b.delete(doc(shotsCol(), id)); }); await b.commit(); } },
+  subscribeAccounts(cb, onErr) { return onSnapshot(acctCol(), s => cb(s.docs.map(d => d.data())), onErr); },
+  saveAccount: a => setDoc(doc(acctCol(), a.id), a),
+  removeAccount: id => deleteDoc(doc(acctCol(), id)),
   saveShots: (id, images) => images.length ? setDoc(doc(shotsCol(), id), { id, images }) : deleteDoc(doc(shotsCol(), id)),
   async getShots(id) { const s = await getDoc(doc(shotsCol(), id)); return s.exists() ? (s.data().images || []) : []; },
 };

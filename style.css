@@ -115,3 +115,28 @@ dialog.drop{outline:3px dashed var(--accent);outline-offset:-6px}
 
 /* author display rules (label{display:block}, .btn{display:inline-block}) must not defeat the hidden attribute */
 [hidden]{display:none !important}
+
+#taSel{width:auto;max-width:190px;padding:7px 8px}
+.small-dlg.wide{width:min(640px,96vw)}
+.dlg-pad{padding:18px 20px;max-height:92vh;overflow:auto}
+.ta-row{display:flex;gap:10px;align-items:center;justify-content:space-between;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:8px 0}
+#taForm{border-top:1px solid var(--line);margin-top:14px;padding-top:6px}
+#taForm h3{margin:8px 0 0;font-size:15px}
+.chip{font-size:11px;padding:1px 8px;border-radius:99px;border:1px solid var(--line);color:var(--muted);text-transform:capitalize}
+.chip.active{color:var(--win)}.chip.failed{color:var(--loss)}.chip.passed{color:var(--accent)}
+.chip.warn{color:#d97706}.chip.bad{color:var(--loss)}.chip.good{color:var(--win)}
+.acct-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px}
+.meters{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+.meter{border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.meter .k{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.meter .v{font-size:20px;font-weight:700}
+.meter .s{font-size:12px;color:var(--muted)}
+.bar{height:8px;background:var(--bg);border-radius:99px;overflow:hidden;margin:6px 0}
+.bar i{display:block;height:100%;border-radius:99px;background:var(--win)}
+.bar i.warn{background:#d97706}.bar i.bad{background:var(--loss)}
+.tbl-wrap{overflow-x:auto}
+.acct-table{width:100%;border-collapse:collapse;font-size:14px}
+.acct-table th{text-align:left;font-size:12px;color:var(--muted);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line)}
+.acct-table td{padding:8px;border-bottom:1px solid var(--line)}
+.acct-table tbody tr{cursor:pointer}.acct-table tbody tr:hover{background:var(--bg)}
+#acctPanel .card{margin-bottom:16px}

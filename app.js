@@ -18,6 +18,41 @@ let cloudUser = null, unsub = null, syncState = 'Offline', syncErr = '';
 const storeKey = () => uid ? 'tj.cloud.' + uid : KEY;
 let trades = load(storeKey());
 let rating = 0;
+// trading (prop firm) accounts: each trade has t.acct; trades saved before this feature have none and belong to 'main'
+const ACCT_KEY = 'tj.accounts.v1';
+const acctStoreKey = () => uid ? 'tj.cloudacct.' + uid : ACCT_KEY;
+let tAccts = load(acctStoreKey()), activeAcct = lsGet('tj.activeAcct') || 'all', unsubA = null;
+const acctOf = t => t.acct || 'main';
+function allAccts() {
+  const list = tAccts.slice();
+  if (!list.some(a => a.id === 'main') && (trades.some(t => acctOf(t) === 'main') || !list.length)) list.unshift({ id: 'main', name: 'Main account', type: 'Personal', status: 'active', virtual: true });
+  return list;
+}
+const acctById = id => allAccts().find(a => a.id === id);
+const acctName = id => (acctById(id) || {}).name || 'Deleted account';
+const visibleAccts = () => allAccts().filter(a => a.status !== 'archived');
+const inScope = () => activeAcct === 'all' ? trades : trades.filter(t => acctOf(t) === activeAcct);
+function saveAccts() { try { localStorage.setItem(acctStoreKey(), JSON.stringify(tAccts)); } catch {} }
+function cleanAcct(a) {
+  const n = v => (v === '' || v == null || isNaN(+v)) ? null : +v, s = (v, m) => String(v ?? '').slice(0, m);
+  return {
+    id: s(a.id, 80), name: s(a.name, 60) || 'Account', firm: s(a.firm, 40), type: ['Evaluation', 'Funded', 'Live', 'Demo', 'Personal'].includes(a.type) ? a.type : 'Personal',
+    status: ['active', 'passed', 'failed', 'archived'].includes(a.status) ? a.status : 'active', startBalance: n(a.startBalance), targetPct: n(a.targetPct),
+    dailyPct: n(a.dailyPct), ddPct: n(a.ddPct), ddType: a.ddType === 'trailing' ? 'trailing' : 'static', created: n(a.created) || Date.now(),
+  };
+}
+function upsertAcct(a) {
+  if (!writable()) return false;
+  if (cloudUser) cloudLib.saveAccount(a).catch(syncFail);
+  else { const i = tAccts.findIndex(x => x.id === a.id); i >= 0 ? tAccts[i] = a : tAccts.push(a); saveAccts(); renderAll(); }
+  return true;
+}
+function removeAcct(id) {
+  if (!writable()) return false;
+  if (cloudUser) cloudLib.removeAccount(id).catch(syncFail);
+  else { tAccts = tAccts.filter(a => a.id !== id); saveAccts(); renderAll(); }
+  return true;
+}
 const now0 = new Date();
 let calY = now0.getFullYear(), calM = now0.getMonth();
 const pad = n => String(n).padStart(2, '0');
@@ -135,7 +170,7 @@ function rMultiple(t) {
   return (t.exit - t.entry) * d / risk;
 }
 const result = t => t.pnl > 0 ? 'win' : t.pnl < 0 ? 'loss' : 'be';
-const closed = () => trades.filter(t => t.pnl != null);
+const closed = () => inScope().filter(t => t.pnl != null);
 
 // ---- stats ----
 function computeStats(list) {
@@ -218,24 +253,25 @@ function renderEmotionBars(sel, field) {
 }
 
 function renderLessons() {
-  const L = trades.filter(t => t.learned).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
+  const L = inScope().filter(t => t.learned).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5);
   $('#lessons').innerHTML = L.length ? L.map(t => `<p><b>${esc(t.date)} · ${esc(t.instrument)}</b><br>${esc(t.learned)}</p>`).join('') : '<div class="empty">Lessons you write will show up here.</div>';
 }
 
 // ---- journal list ----
 function renderList() {
   const q = $('#search').value.toLowerCase(), fr = $('#fResult').value, fd = $('#fDir').value;
-  const list = trades.slice().sort((a, b) => b.date.localeCompare(a.date) || b.created - a.created).filter(t =>
+  const list = inScope().slice().sort((a, b) => b.date.localeCompare(a.date) || b.created - a.created).filter(t =>
     (!fr || result(t) === fr) && (!fd || t.direction === fd) &&
     (!q || [t.date, t.instrument, t.signal, t.emoNotes, t.better, t.learned, t.trail].join(' ').toLowerCase().includes(q)));
-  if (!list.length) { $('#list').innerHTML = `<div class="empty">${trades.length ? 'No trades match your filters.' : 'No trades yet. Click “+ New trade” to log your first one, or load demo data in the Data tab.'}</div>`; return; }
+  if (!list.length) { $('#list').innerHTML = `<div class="empty">${inScope().length ? 'No trades match your filters.' : 'No trades yet. Click “+ New trade” to log your first one, or load demo data in the Data tab.'}</div>`; return; }
+  const multi = activeAcct === 'all' && allAccts().length > 1;
   $('#list').innerHTML = list.map(t => {
     const r = rMultiple(t), pnl = t.pnl;
     const f = (k, v) => v ? `<div class="txt"><b>${k}:</b> ${esc(v)}</div>` : '';
     const lv = [['Entry', t.entry], ['Stop', t.stop], ['Target', t.target], ['Exit', t.exit]].filter(x => x[1] != null).map(x => `${x[0]} ${x[1]}`).join(' · ');
     const emo = [['entry', t.emoEntry], ['losers', t.emoLoser], ['winners', t.emoWinner], ['exit', t.emoExit]].filter(x => x[1]).map(x => `${x[1]} (${x[0]})`).join(', ');
     return `<article class="trade ${result(t)}" data-id="${esc(t.id)}" tabindex="0">
-      <div class="h"><span class="sym">${esc(t.instrument)}</span><span class="tag ${t.direction}">${t.direction}</span><span class="muted small">${esc(t.date)}</span>${t.plan ? `<span class="tag">plan ${t.plan}/5</span>` : ''}${t.imgCount ? `<span class="tag">📷 ${t.imgCount}</span>` : ''}${r != null ? `<span class="tag">${r.toFixed(2)}R</span>` : ''}<span class="pl ${sgn(pnl)}">${pnl == null ? 'open' : money(pnl)}</span></div>
+      <div class="h"><span class="sym">${esc(t.instrument)}</span><span class="tag ${t.direction}">${t.direction}</span><span class="muted small">${esc(t.date)}</span>${multi ? `<span class="tag">${esc(acctName(acctOf(t)))}</span>` : ''}${t.plan ? `<span class="tag">plan ${t.plan}/5</span>` : ''}${t.imgCount ? `<span class="tag">📷 ${t.imgCount}</span>` : ''}${r != null ? `<span class="tag">${r.toFixed(2)}R</span>` : ''}<span class="pl ${sgn(pnl)}">${pnl == null ? 'open' : money(pnl)}</span></div>
       <div class="meta">${esc(lv)}${t.trail ? ' · trail: ' + esc(t.trail) : ''}</div>
       ${f('Signal', t.signal)}${emo ? `<div class="txt"><b>Emotions:</b> ${esc(emo)}${t.emoNotes ? ' — ' + esc(t.emoNotes) : ''}</div>` : ''}${f('Do better', t.better)}${f('Learned', t.learned)}${t.imgCount ? `<div class="thumbs" data-id="${esc(t.id)}"></div>` : ''}</article>`;
   }).join('');
@@ -277,7 +313,7 @@ $('#cal').addEventListener('click', e => {
 });
 $('#cal').addEventListener('keydown', e => { if (e.key === 'Enter') e.target.click?.(); });
 
-function renderAll() { renderCalendar(); renderStats(); renderEquity(); renderAdherence(); renderEmotionBars('#emoEntry', 'emoEntry'); renderEmotionBars('#emoExit', 'emoExit'); renderLessons(); renderList(); }
+function renderAll() { renderAcctSel(); renderAcctPanel(); if (taDlg.open) renderTaList(); renderCalendar(); renderStats(); renderEquity(); renderAdherence(); renderEmotionBars('#emoEntry', 'emoEntry'); renderEmotionBars('#emoExit', 'emoExit'); renderLessons(); renderList(); }
 
 // ---- form ----
 const dlg = $('#dlg'), form = $('#form');
@@ -302,6 +338,7 @@ function openForm(t, date) {
   form.reset();
   const f = form.elements;
   f.id.value = t?.id || '';
+  fillAcctSelect(f.acct, t ? acctOf(t) : (activeAcct !== 'all' ? activeAcct : lsGet('tj.lastAcct')));
   f.date.value = t?.date || date || ymd(now0.getFullYear(), now0.getMonth(), now0.getDate());
   if (t) for (const k of ['instrument', 'direction', 'size', 'entry', 'exit', 'stop', 'target', 'trail', 'pnl', 'fxRate', 'signal', 'emoEntry', 'emoLoser', 'emoWinner', 'emoExit', 'emoNotes', 'better', 'learned']) f[k].value = t[k] ?? '';
   setRating(t?.plan || 0);
@@ -318,7 +355,7 @@ form.addEventListener('submit', e => {
   const t = {
     id: id || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random())),
     created: id ? (trades.find(x => x.id === id)?.created ?? Date.now()) : Date.now(),
-    date: f.date.value, instrument: f.instrument.value.trim().toUpperCase(), direction: f.direction.value,
+    acct: f.acct.value || 'main', date: f.date.value, instrument: f.instrument.value.trim().toUpperCase(), direction: f.direction.value,
     size: num(f.size.value), entry: num(f.entry.value), exit: num(f.exit.value), stop: num(f.stop.value), target: num(f.target.value),
     trail: f.trail.value.trim(), pnl: num(f.pnl.value), fxRate: contract(f.instrument.value.trim()).cross ? num(f.fxRate.value) : null, signal: f.signal.value.trim(),
     emoEntry: f.emoEntry.value, emoLoser: f.emoLoser.value, emoWinner: f.emoWinner.value, emoExit: f.emoExit.value,
@@ -330,7 +367,7 @@ form.addEventListener('submit', e => {
   else { t.pnl = typed; t.pnlManual = typed != null; }
   t.imgCount = shotsDirty ? pendingShots.length : (prev ? prev.imgCount || 0 : 0);
   if (shotsDirty && writable()) putShots(t.id, pendingShots.slice());   // before upsert: the list re-renders (and reads the image cache) inside it
-  if (upsertTrades([t])) { dlg.close(); toast('Trade saved'); }
+  if (upsertTrades([t])) { lsSet('tj.lastAcct', t.acct); dlg.close(); toast('Trade saved'); }
 });
 function updateInstr() {
   const f = form.elements, c = contract(f.instrument.value);
@@ -358,18 +395,21 @@ function download(name, text, type) { const a = document.createElement('a'); a.h
 $('#exportJson').onclick = async () => {
   const out = [];
   for (const t of trades) out.push(t.imgCount ? { ...t, images: await getShots(t.id) } : t);
-  download('trading-journal.json', JSON.stringify(out, null, 2), 'application/json');
+  download('trading-journal.json', JSON.stringify({ app: 'trading-journal', version: 2, accounts: allAccts().filter(a => !a.virtual), trades: out }, null, 2), 'application/json');
 };
 $('#exportCsv').onclick = () => {
-  const cols = ['date', 'instrument', 'direction', 'size', 'entry', 'exit', 'stop', 'target', 'trail', 'pnl', 'signal', 'emoEntry', 'emoLoser', 'emoWinner', 'emoExit', 'emoNotes', 'plan', 'better', 'learned'];
+  const cols = ['date', 'account', 'instrument', 'direction', 'size', 'entry', 'exit', 'stop', 'target', 'trail', 'pnl', 'signal', 'emoEntry', 'emoLoser', 'emoWinner', 'emoExit', 'emoNotes', 'plan', 'better', 'learned'];
   const cell = v => { v = v ?? ''; v = String(v); if (/^[=+\-@]/.test(v) && isNaN(+v)) v = "'" + v; return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-  download('trading-journal.csv', [cols.join(','), ...trades.map(t => cols.map(c => cell(t[c])).join(','))].join('\n'), 'text/csv');
+  download('trading-journal.csv', [cols.join(','), ...trades.map(t => cols.map(c => cell(c === 'account' ? acctName(acctOf(t)) : t[c])).join(','))].join('\n'), 'text/csv');
 };
 $('#importFile').onchange = async e => {
   const file = e.target.files[0]; if (!file) return;
   try {
-    const data = JSON.parse(await file.text());
+    const raw = JSON.parse(await file.text());
+    const data = Array.isArray(raw) ? raw : raw && raw.trades;
     if (!Array.isArray(data)) throw 0;
+    const haveA = new Set(tAccts.map(a => a.id));
+    (raw && Array.isArray(raw.accounts) ? raw.accounts : []).forEach(a => { if (a && a.id && a.name && !haveA.has(a.id)) upsertAcct(cleanAcct(a)); });
     const have = new Set(trades.map(t => t.id));
     const fresh = data.filter(t => t && t.id && t.date && t.instrument && !have.has(t.id));
     const imgs = new Map();
@@ -390,14 +430,134 @@ $('#loadDemo').onclick = () => {
     const plan = 1 + Math.floor(rnd() * 5), win = rnd() < 0.3 + plan * 0.08, r = win ? 1 + rnd() * 2 : -(0.6 + rnd() * 0.6);
     const dir = rnd() < .6 ? 'long' : 'short', entry = 100, risk = 2, d = dir === 'long' ? 1 : -1;
     demo.push({
-      id: 'demo' + i + today, created: today + i, date: new Date(today - (24 - i) * 86400000 * 1.5).toISOString().slice(0, 10),
+      id: 'demo' + i + today, acct: i % 2 ? 'demoB' : 'demoA', created: today + i, date: new Date(today - (24 - i) * 86400000 * 1.5).toISOString().slice(0, 10),
       instrument: syms[i % 4], direction: dir, size: 1, entry, stop: entry - d * risk, target: entry + d * risk * 2, exit: +(entry + d * risk * r).toFixed(2), trail: i % 3 ? '' : 'Trail 1R under swing',
-      pnl: +(r * 100).toFixed(2), signal: win ? 'H1 EMA bounce with LTF break of structure' : 'Early entry before confirmation',
+      pnl: +(r * (i % 2 ? 400 : 800)).toFixed(2), pnlManual: true, signal: win ? 'H1 EMA bounce with LTF break of structure' : 'Early entry before confirmation',
       emoEntry: plan > 3 ? 'Calm' : 'FOMO', emoLoser: win ? '' : 'Anxious', emoWinner: win ? 'Greedy' : '', emoExit: win ? 'Relieved' : 'Frustrated', emoNotes: '',
       plan, better: plan < 4 ? 'Wait for confirmation candle' : '', learned: plan < 3 ? 'Off-plan trades cost me. Skip when unsure.' : '',
     });
   }
+  [
+    { id: 'demoA', name: 'Demo Challenge 100k', firm: 'Demo Prop Firm', type: 'Evaluation', status: 'active', startBalance: 100000, targetPct: 8, dailyPct: 5, ddPct: 10, ddType: 'static' },
+    { id: 'demoB', name: 'Demo Funded 50k', firm: 'Demo Prop Firm', type: 'Funded', status: 'active', startBalance: 50000, targetPct: null, dailyPct: 4, ddPct: 6, ddType: 'trailing' },
+  ].forEach(a => { if (!tAccts.some(x => x.id === a.id)) upsertAcct({ ...a, created: Date.now() }); });
   if (upsertTrades(demo)) toast('Demo data loaded');
+};
+
+// ---- trading accounts: switcher, health panel, manager ----
+const taDlg = $('#taDlg'), taForm = $('#taForm');
+let pendingActive = null;   // new account to switch to once its cloud snapshot arrives
+function fillAcctSelect(sel, want) {
+  const vis = visibleAccts(), cur = want && acctById(want);
+  const opts = cur && cur.status === 'archived' ? [...vis, cur] : vis;
+  sel.innerHTML = opts.map(a => `<option value="${esc(a.id)}">${esc(a.name)}${a.status === 'archived' ? ' (archived)' : ''}</option>`).join('');
+  sel.value = opts.some(a => a.id === want) ? want : (opts[0] ? opts[0].id : 'main');
+}
+function renderAcctSel() {
+  const s = $('#taSel'), vis = visibleAccts();
+  if (activeAcct !== 'all' && !vis.some(a => a.id === activeAcct)) activeAcct = 'all';
+  s.innerHTML = '<option value="all">All accounts</option>' + vis.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
+  s.value = activeAcct;
+}
+$('#taSel').onchange = e => { activeAcct = e.target.value; lsSet('tj.activeAcct', activeAcct); renderAll(); };
+function acctHealth(a) {
+  const list = trades.filter(t => acctOf(t) === a.id && t.pnl != null).sort((x, y) => x.date.localeCompare(y.date) || x.created - y.created);
+  const start = a.startBalance > 0 ? +a.startBalance : null, net = list.reduce((s, t) => s + t.pnl, 0), h = { n: list.length, net, start };
+  if (start == null) return h;
+  let run = 0, peak = 0; list.forEach(t => { run += t.pnl; if (run > peak) peak = run; });
+  h.balance = start + net;
+  if (a.targetPct > 0) { h.targetAmt = start * a.targetPct / 100; h.targetProg = net / h.targetAmt; }
+  if (a.ddPct > 0) {
+    h.ddAmt = start * a.ddPct / 100;
+    h.floor = a.ddType === 'trailing' ? Math.min(start + peak - h.ddAmt, start) : start - h.ddAmt;   // trailing locks at the start balance
+    h.ddRemain = h.balance - h.floor; h.ddUsed = 1 - h.ddRemain / h.ddAmt;
+  }
+  if (a.dailyPct > 0) {
+    const d = new Date(), today = ymd(d.getFullYear(), d.getMonth(), d.getDate());
+    h.todayPnl = list.filter(t => t.date === today).reduce((s, t) => s + t.pnl, 0);
+    h.dailyAmt = start * a.dailyPct / 100; h.dailyUsed = Math.max(0, -h.todayPnl) / h.dailyAmt;
+  }
+  return h;
+}
+const usedCls = u => u >= 1 ? 'bad' : u >= 0.8 ? 'warn' : '';
+function meter(k, v, frac, cls, sub) {
+  const bar = frac == null ? '' : `<div class="bar"><i class="${cls}" style="width:${Math.max(0, Math.min(1, frac)) * 100}%"></i></div>`;
+  return `<div class="meter"><div class="k">${k}</div><div class="v">${v}</div>${bar}<div class="s">${sub}</div></div>`;
+}
+function renderAcctPanel() {
+  const el = $('#acctPanel'), vis = visibleAccts();
+  if (activeAcct === 'all') {
+    if (vis.length < 2) { el.innerHTML = ''; return; }
+    const rows = vis.map(a => {
+      const s = computeStats(trades.filter(t => acctOf(t) === a.id && t.pnl != null)), h = acctHealth(a);
+      return `<tr data-id="${esc(a.id)}"><td><b>${esc(a.name)}</b><div class="muted small">${esc([a.firm, a.type].filter(Boolean).join(' · '))}</div></td><td><span class="chip ${esc(a.status)}">${esc(a.status)}</span></td><td>${s.n}</td><td>${s.n ? (s.winRate * 100).toFixed(0) + '%' : '–'}</td><td class="${sgn(s.net)}">${money(s.net)}</td><td>${h.balance != null ? money(h.balance) : '–'}</td></tr>`;
+    }).join('');
+    el.innerHTML = `<div class="card"><h2>Your accounts</h2><div class="tbl-wrap"><table class="acct-table"><thead><tr><th>Account</th><th>Status</th><th>Trades</th><th>Win rate</th><th>Net P&amp;L</th><th>Balance</th></tr></thead><tbody>${rows}</tbody></table></div><p class="muted small">Click an account to open it. Totals below are across all accounts.</p></div>`;
+    return;
+  }
+  const a = acctById(activeAcct); if (!a) { el.innerHTML = ''; return; }
+  const h = acctHealth(a), flags = [];
+  if (h.ddRemain != null && h.ddRemain <= 0) flags.push('<span class="chip bad">Max drawdown breached</span>');
+  if (h.targetProg != null && h.targetProg >= 1) flags.push('<span class="chip good">Profit target reached</span>');
+  let body;
+  if (h.balance == null) body = '<p class="muted small">Add a starting balance, profit target and drawdown limits (Edit) to see balance, target progress and risk meters for this account.</p>';
+  else {
+    const m = [meter('Balance', money(h.balance), null, '', `start ${money(h.start)} · net <span class="${sgn(h.net)}">${money(h.net)}</span>`)];
+    if (h.targetAmt != null) m.push(meter('Profit target', Math.max(0, h.targetProg * 100).toFixed(0) + '%', h.targetProg, '', `${money(h.net)} of ${money(h.targetAmt)}`));
+    if (h.ddAmt != null) m.push(meter('Drawdown room', money(Math.max(0, h.ddRemain)), 1 - h.ddUsed, usedCls(h.ddUsed), `limit ${money(h.ddAmt)} · floor ${money(h.floor)}${a.ddType === 'trailing' ? ' (trailing)' : ''}`));
+    if (h.dailyAmt != null) m.push(meter('Today’s loss limit', money(Math.max(0, h.dailyAmt + Math.min(0, h.todayPnl))), 1 - h.dailyUsed, usedCls(h.dailyUsed), `today ${money(h.todayPnl)} · limit ${money(h.dailyAmt)}`));
+    body = `<div class="meters">${m.join('')}</div>`;
+  }
+  el.innerHTML = `<div class="card"><div class="acct-head"><div><b>${esc(a.name)}</b> <span class="chip ${esc(a.status)}">${esc(a.status)}</span> ${flags.join(' ')}<div class="muted small">${esc([a.firm, a.type].filter(Boolean).join(' · '))}</div></div><button class="btn" id="taEditCur">Edit</button></div>${body}</div>`;
+}
+$('#acctPanel').addEventListener('click', e => {
+  const r = e.target.closest('tr[data-id]');
+  if (r) { activeAcct = r.dataset.id; lsSet('tj.activeAcct', activeAcct); renderAll(); return; }
+  if (e.target.closest('#taEditCur')) { taDlg.showModal(); renderTaList(); openAcctForm(acctById(activeAcct)); }
+});
+function renderTaList() {
+  $('#taList').innerHTML = allAccts().map(a => {
+    const n = trades.filter(t => acctOf(t) === a.id).length;
+    return `<div class="ta-row" data-id="${esc(a.id)}"><div><b>${esc(a.name)}</b> <span class="chip ${esc(a.status)}">${esc(a.status)}</span><div class="muted small">${esc([a.firm, a.type, a.startBalance ? money(a.startBalance) : ''].filter(Boolean).join(' · '))} · ${n} trade${n === 1 ? '' : 's'}</div></div><button type="button" class="btn" data-act="edit">Edit</button></div>`;
+  }).join('');
+}
+function openAcctForm(a) {
+  const f = taForm.elements; taForm.reset(); taForm.hidden = false;
+  f.id.value = a ? a.id : '';
+  for (const k of ['name', 'firm', 'type', 'status', 'startBalance', 'targetPct', 'dailyPct', 'ddPct', 'ddType']) f[k].value = a && a[k] != null ? a[k] : (k === 'status' ? 'active' : k === 'type' ? 'Evaluation' : k === 'ddType' ? 'static' : '');
+  $('#taFormTitle').textContent = a ? 'Edit account' : 'New account';
+  $('#taDelete').hidden = !a || !!(a && a.virtual); $('#taArchive').hidden = !a;
+  $('#taArchive').textContent = a && a.status === 'archived' ? 'Unarchive' : 'Archive';
+}
+$('#taMgr').onclick = () => { taForm.hidden = true; renderTaList(); taDlg.showModal(); };
+$('#taClose').onclick = () => taDlg.close();
+taDlg.addEventListener('click', e => { if (e.target === taDlg) taDlg.close(); });
+$('#taNew').onclick = () => openAcctForm(null);
+$('#taCancel').onclick = () => { taForm.hidden = true; };
+$('#taList').addEventListener('click', e => { const r = e.target.closest('.ta-row'); if (r && e.target.closest('[data-act=edit]')) openAcctForm(acctById(r.dataset.id)); });
+taForm.elements.preset.addEventListener('change', e => {
+  const P = { challenge: { targetPct: 8, dailyPct: 5, ddPct: 10, ddType: 'static' }, funded: { targetPct: '', dailyPct: 5, ddPct: 10, ddType: 'static' } }[e.target.value];
+  if (P) Object.entries(P).forEach(([k, v]) => { taForm.elements[k].value = v; });
+});
+taForm.addEventListener('submit', e => {
+  e.preventDefault();
+  const f = taForm.elements, old = f.id.value ? acctById(f.id.value) : null;
+  const a = cleanAcct({
+    id: f.id.value || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random())), name: f.name.value.trim(), firm: f.firm.value.trim(), type: f.type.value,
+    status: f.status.value, startBalance: f.startBalance.value, targetPct: f.targetPct.value, dailyPct: f.dailyPct.value, ddPct: f.ddPct.value, ddType: f.ddType.value, created: old && old.created,
+  });
+  if (!a.name) return;
+  if (!old) { if (cloudUser) pendingActive = a.id; else { activeAcct = a.id; lsSet('tj.activeAcct', a.id); } }   // set before upsert: its render must see it
+  if (upsertAcct(a)) { taForm.hidden = true; toast('Account saved'); }
+});
+$('#taArchive').onclick = () => {
+  const id = taForm.elements.id.value, a = acctById(id); if (!a) return;
+  if (upsertAcct({ ...cleanAcct(a), status: a.status === 'archived' ? 'active' : 'archived' })) { taForm.hidden = true; toast(a.status === 'archived' ? 'Account restored' : 'Account archived'); }
+};
+$('#taDelete').onclick = () => {
+  const id = taForm.elements.id.value, n = trades.filter(t => acctOf(t) === id).length;
+  if (n) return toast(`This account has ${n} trade(s). Archive it, or move/delete its trades first.`);
+  if (confirm('Delete this account?') && removeAcct(id)) { taForm.hidden = true; toast('Account deleted'); }
 };
 
 // ---- account / sync ----
@@ -430,11 +590,11 @@ function onSnap(list, meta) {
   trades = list; save(); renderAll(); updateAcct();
 }
 function offerMigration(u) {
-  const local = load(KEY), flag = 'tj.migrated.' + u.uid;
-  if (!local.length || lsGet(flag)) return;
+  const local = load(KEY), localA = load(ACCT_KEY), flag = 'tj.migrated.' + u.uid;
+  if ((!local.length && !localA.length) || lsGet(flag)) return;
   setTimeout(() => {
-    if (!confirm(`Upload the ${local.length} trade(s) saved on this device to ${u.email}?`)) { lsSet(flag, '1'); return; }
-    cloudLib.saveMany(local).then(() => { const m = localShots(); local.forEach(t => { if (m[t.id]) cloudLib.saveShots(t.id, m[t.id]).catch(syncFail); }); lsSet(flag, '1'); toast('Uploaded to your account'); }).catch(syncFail);
+    if (!confirm(`Upload the ${local.length} trade(s) and ${localA.length} trading account(s) saved on this device to ${u.email}?`)) { lsSet(flag, '1'); return; }
+    cloudLib.saveMany(local).then(() => { localA.forEach(a => cloudLib.saveAccount(a).catch(syncFail)); const m = localShots(); local.forEach(t => { if (m[t.id]) cloudLib.saveShots(t.id, m[t.id]).catch(syncFail); }); lsSet(flag, '1'); toast('Uploaded to your account'); }).catch(syncFail);
   }, 700);
 }
 if (cloudLib) {
@@ -448,9 +608,10 @@ if (cloudLib) {
   window.addEventListener('online', updateAcct); window.addEventListener('offline', updateAcct);
   cloudLib.onAuth(u => {
     if (unsub) { unsub(); unsub = null; }
+    if (unsubA) { unsubA(); unsubA = null; }
     cloudUser = u; syncErr = ''; syncState = 'Connecting…'; shotCache.clear();
-    if (u) { uid = u.uid; lsSet('tj.lastUid', uid); trades = load(storeKey()); renderAll(); unsub = cloudLib.subscribe(onSnap, syncFail); offerMigration(u); }
-    else { uid = null; lsSet('tj.lastUid', null); trades = load(KEY); renderAll(); }
+    if (u) { uid = u.uid; lsSet('tj.lastUid', uid); trades = load(storeKey()); tAccts = load(acctStoreKey()); renderAll(); unsub = cloudLib.subscribe(onSnap, syncFail); unsubA = cloudLib.subscribeAccounts(l => { tAccts = l; saveAccts(); if (pendingActive && l.some(x => x.id === pendingActive)) { activeAcct = pendingActive; lsSet('tj.activeAcct', activeAcct); pendingActive = null; } renderAll(); }, syncFail); offerMigration(u); }
+    else { uid = null; lsSet('tj.lastUid', null); trades = load(KEY); tAccts = load(ACCT_KEY); renderAll(); }
     updateAcct();
   });
 }

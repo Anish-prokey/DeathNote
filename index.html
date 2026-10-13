@@ -17,13 +17,16 @@
     <button class="tab" data-view="journal">Journal</button>
     <button class="tab" data-view="settings">Data</button>
   </nav>
-  <button class="btn" id="acctBtn" title="Account &amp; sync">Sign in</button>
+  <select id="taSel" aria-label="Trading account" title="Trading account"></select>
+  <button class="btn" id="taMgr" title="Manage trading accounts" aria-label="Manage trading accounts">&#9881;</button>
+  <button class="btn" id="acctBtn" title="Login &amp; sync">Sign in</button>
   <button class="btn primary" id="newTradeBtn">+ New trade</button>
 </header>
 
 <main>
   <!-- DASHBOARD -->
   <section id="view-dashboard" class="view active">
+    <div id="acctPanel"></div>
     <div class="stats" id="stats"></div>
     <div class="grid2">
       <div class="card"><h2>Equity curve</h2><div id="equity" class="chart"></div></div>
@@ -96,6 +99,7 @@
     <fieldset>
       <legend>The trade</legend>
       <div class="fgrid">
+        <label>Account<select name="acct"></select></label>
         <label>Date<input type="date" name="date" required></label>
         <label>Instrument<input name="instrument" list="instrList" autocomplete="off" placeholder="Pick or type: XAUUSD, EURUSD, NIFTY…" required></label>
         <label>Direction<select name="direction"><option value="long">Long</option><option value="short">Short</option></select></label>
@@ -165,6 +169,39 @@
     </div>
     <p id="authMsg" class="small" role="status"></p>
   </form>
+</dialog>
+
+<dialog id="taDlg" class="small-dlg wide">
+  <div class="dlg-pad">
+    <div class="dlg-head"><h2>Trading accounts</h2><button type="button" class="x" id="taClose" aria-label="Close">&times;</button></div>
+    <p class="muted small">Keep each prop firm challenge, funded or personal account separate. Trades, stats, calendar and risk meters follow the account you pick in the header.</p>
+    <div id="taList"></div>
+    <div class="row"><button type="button" class="btn primary" id="taNew">+ New account</button></div>
+    <form id="taForm" hidden>
+      <h3 id="taFormTitle">New account</h3>
+      <input type="hidden" name="id">
+      <div class="fgrid">
+        <label>Name<input name="name" placeholder="e.g. FTMO 100k Phase 1" required maxlength="60"></label>
+        <label>Firm<input name="firm" placeholder="e.g. FTMO, FundedNext" maxlength="40"></label>
+        <label>Type<select name="type"><option>Evaluation</option><option>Funded</option><option>Live</option><option>Demo</option><option>Personal</option></select></label>
+        <label>Status<select name="status"><option value="active">Active</option><option value="passed">Passed</option><option value="failed">Failed</option><option value="archived">Archived</option></select></label>
+        <label>Starting balance<input type="number" step="any" min="0" name="startBalance" placeholder="100000"></label>
+        <label>Preset<select name="preset"><option value="">Custom</option><option value="challenge">Generic challenge: 8% target, 5% daily, 10% max</option><option value="funded">Generic funded: no target, 5% daily, 10% max</option></select></label>
+        <label>Profit target %<input type="number" step="any" min="0" name="targetPct" placeholder="8"></label>
+        <label>Max daily loss %<input type="number" step="any" min="0" name="dailyPct" placeholder="5"></label>
+        <label>Max drawdown %<input type="number" step="any" min="0" name="ddPct" placeholder="10"></label>
+        <label>Drawdown type<select name="ddType"><option value="static">Static (from start balance)</option><option value="trailing">Trailing (follows your peak)</option></select></label>
+      </div>
+      <p class="muted small">Rules differ per firm and change over time, so check your firm's current rules and enter them here. The numbers drive the meters only; this is a tracker, not the firm's official count.</p>
+      <div class="dlg-foot">
+        <button type="button" class="btn danger" id="taDelete" hidden>Delete</button>
+        <button type="button" class="btn" id="taArchive" hidden>Archive</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="taCancel">Cancel</button>
+        <button type="submit" class="btn primary">Save account</button>
+      </div>
+    </form>
+  </div>
 </dialog>
 
 <dialog id="lightbox"><img id="lbImg" alt="Trade screenshot"></dialog>
