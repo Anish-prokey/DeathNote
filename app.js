@@ -6,7 +6,7 @@ const RATING_HINT = ['', 'Ignored the plan', 'Mostly off-plan', 'Half and half',
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const num = v => (v === '' || v == null || isNaN(+v)) ? null : +v;
+const num = v => { if (v === '' || v == null) return null; const n = +String(v).trim().replace(',', '.'); return isNaN(n) ? null : n; };
 const money = n => (n < 0 ? '-' : '') + Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: Math.abs(n) < 100 ? 2 : 0 });
 const sgn = n => n > 0 ? 'pos' : n < 0 ? 'neg' : '';
 
@@ -169,7 +169,7 @@ function rMultiple(t) {
   const d = t.direction === 'short' ? -1 : 1;
   return (t.exit - t.entry) * d / risk;
 }
-const result = t => t.pnl > 0 ? 'win' : t.pnl < 0 ? 'loss' : 'be';
+const result = t => t.pnl == null ? 'open' : t.pnl > 0 ? 'win' : t.pnl < 0 ? 'loss' : 'be';
 const closed = () => inScope().filter(t => t.pnl != null);
 
 // ---- stats ----
@@ -193,11 +193,11 @@ function computeStats(list) {
 }
 
 function renderStats() {
-  const s = computeStats(closed());
+  const s = computeStats(closed()), openN = inScope().filter(t => t.pnl == null).length;
   const wl = s.avgLoss ? Math.abs(s.avgWin / s.avgLoss) : null;
   const card = (k, v, sub = '', cls = '') => `<div class="stat"><div class="k">${k}</div><div class="v ${cls}">${v}</div><div class="s">${sub}</div></div>`;
   $('#stats').innerHTML = [
-    card('Net P&L', money(s.net), `${s.n} closed trades`, sgn(s.net)),
+    card('Net P&L', money(s.net), `${s.n} closed${openN ? ' · ' + openN + ' open' : ''}`, sgn(s.net)),
     card('Win rate', s.n ? (s.winRate * 100).toFixed(1) + '%' : '–', `${s.wins}W / ${s.losses}L`),
     card('Avg win', s.wins ? money(s.avgWin) : '–', 'win size', 'pos'),
     card('Avg loss', s.losses ? money(s.avgLoss) : '–', 'loss size', 'neg'),
@@ -271,7 +271,7 @@ function renderList() {
     const lv = [['Entry', t.entry], ['Stop', t.stop], ['Target', t.target], ['Exit', t.exit]].filter(x => x[1] != null).map(x => `${x[0]} ${x[1]}`).join(' · ');
     const emo = [['entry', t.emoEntry], ['losers', t.emoLoser], ['winners', t.emoWinner], ['exit', t.emoExit]].filter(x => x[1]).map(x => `${x[1]} (${x[0]})`).join(', ');
     return `<article class="trade ${result(t)}" data-id="${esc(t.id)}" tabindex="0">
-      <div class="h"><span class="sym">${esc(t.instrument)}</span><span class="tag ${t.direction}">${t.direction}</span><span class="muted small">${esc(t.date)}</span>${multi ? `<span class="tag">${esc(acctName(acctOf(t)))}</span>` : ''}${t.plan ? `<span class="tag">plan ${t.plan}/5</span>` : ''}${t.imgCount ? `<span class="tag">📷 ${t.imgCount}</span>` : ''}${r != null ? `<span class="tag">${r.toFixed(2)}R</span>` : ''}<span class="pl ${sgn(pnl)}">${pnl == null ? 'open' : money(pnl)}</span></div>
+      <div class="h"><span class="sym">${esc(t.instrument)}</span><span class="tag ${t.direction}">${t.direction}</span><span class="muted small">${esc(t.date)}</span>${multi ? `<span class="tag">${esc(acctName(acctOf(t)))}</span>` : ''}${t.plan ? `<span class="tag">plan ${t.plan}/5</span>` : ''}${t.imgCount ? `<span class="tag">📷 ${t.imgCount}</span>` : ''}${r != null ? `<span class="tag">${r.toFixed(2)}R</span>` : ''}<span class="pl ${sgn(pnl)}">${pnl == null ? (t.exit != null ? 'set P&amp;L' : 'open') : money(pnl)}</span></div>
       <div class="meta">${esc(lv)}${t.trail ? ' · trail: ' + esc(t.trail) : ''}</div>
       ${f('Signal', t.signal)}${emo ? `<div class="txt"><b>Emotions:</b> ${esc(emo)}${t.emoNotes ? ' — ' + esc(t.emoNotes) : ''}</div>` : ''}${f('Do better', t.better)}${f('Learned', t.learned)}${t.imgCount ? `<div class="thumbs" data-id="${esc(t.id)}"></div>` : ''}</article>`;
   }).join('');
@@ -352,6 +352,8 @@ function openForm(t, date) {
 form.addEventListener('submit', e => {
   e.preventDefault();
   const f = form.elements, id = f.id.value;
+  const LBL = { size: 'Size', entry: 'Entry price', exit: 'Exit price', stop: 'Stop loss', target: 'Profit target', pnl: 'Result P&L', fxRate: 'Conversion rate' };
+  for (const k of Object.keys(LBL)) if (f[k].value.trim() !== '' && num(f[k].value) == null) { toast(`${LBL[k]} "${f[k].value}" is not a valid number`); f[k].focus(); return; }
   const t = {
     id: id || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random())),
     created: id ? (trades.find(x => x.id === id)?.created ?? Date.now()) : Date.now(),
@@ -365,6 +367,10 @@ form.addEventListener('submit', e => {
   const prev = trades.find(x => x.id === t.id), auto = autoPnl(t), typed = num(f.pnl.value);
   if (auto != null && (typed == null || (prev && !prev.pnlManual && typed === prev.pnl))) { t.pnl = +auto.toFixed(2); t.pnlManual = false; }
   else { t.pnl = typed; t.pnlManual = typed != null; }
+  if (t.exit != null && t.pnl == null) {   // exit given but no result: cross pair without a conversion rate
+    const cross = contract(t.instrument).cross; toast(cross ? 'Enter the conversion rate (or type the P&L) so the result can be calculated' : 'Could not calculate the P&L: type it in Result P&L');
+    (cross ? f.fxRate : f.pnl).focus(); return;
+  }
   t.imgCount = shotsDirty ? pendingShots.length : (prev ? prev.imgCount || 0 : 0);
   if (shotsDirty && writable()) putShots(t.id, pendingShots.slice());   // before upsert: the list re-renders (and reads the image cache) inside it
   if (upsertTrades([t])) { lsSet('tj.lastAcct', t.acct); dlg.close(); toast('Trade saved'); }
@@ -378,6 +384,12 @@ function updateInstr() {
   f.pnl.placeholder = p != null ? 'auto: ' + +p.toFixed(2) : c.cross && f.exit.value ? 'enter the rate above' : 'auto from entry & exit';
 }
 form.addEventListener('input', updateInstr);
+$('#qres').addEventListener('click', e => {
+  const b = e.target.closest('[data-q]'); if (!b) return;
+  const f = form.elements, src = { target: 'target', stop: 'stop', be: 'entry' }[b.dataset.q];
+  if (!f[src].value.trim()) { toast(`Enter the ${src === 'entry' ? 'entry' : src} price first`); f[src].focus(); return; }
+  f.exit.value = f[src].value; updateInstr();
+});
 $('#newTradeBtn').onclick = () => openForm();
 $('#cancelBtn').onclick = $('#closeDlg').onclick = () => dlg.close();
 $('#delBtn').onclick = () => { if (confirm('Delete this trade?') && removeTrades([form.elements.id.value])) { dlg.close(); toast('Deleted'); } };

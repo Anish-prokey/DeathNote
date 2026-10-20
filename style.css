@@ -140,3 +140,6 @@ dialog.drop{outline:3px dashed var(--accent);outline-offset:-6px}
 .acct-table td{padding:8px;border-bottom:1px solid var(--line)}
 .acct-table tbody tr{cursor:pointer}.acct-table tbody tr:hover{background:var(--bg)}
 #acctPanel .card{margin-bottom:16px}
+
+.trade.open{border-left-style:dashed}
+#qres{align-items:center;margin:8px 0}

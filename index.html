@@ -56,7 +56,7 @@
   <section id="view-journal" class="view">
     <div class="toolbar">
       <input type="search" id="search" placeholder="Search instrument, signal, notes…">
-      <select id="fResult"><option value="">All results</option><option value="win">Wins</option><option value="loss">Losses</option><option value="be">Breakeven</option></select>
+      <select id="fResult"><option value="">All results</option><option value="win">Wins</option><option value="loss">Losses</option><option value="be">Breakeven</option><option value="open">Open</option></select>
       <select id="fDir"><option value="">Long &amp; short</option><option value="long">Long</option><option value="short">Short</option></select>
     </div>
     <div id="list"></div>
@@ -103,15 +103,16 @@
         <label>Date<input type="date" name="date" required></label>
         <label>Instrument<input name="instrument" list="instrList" autocomplete="off" placeholder="Pick or type: XAUUSD, EURUSD, NIFTY…" required></label>
         <label>Direction<select name="direction"><option value="long">Long</option><option value="short">Short</option></select></label>
-        <label>Size <span id="sizeUnit" class="small"></span><input type="number" step="any" name="size" placeholder="1"></label>
-        <label>Entry price<input type="number" step="any" name="entry" required></label>
-        <label>Exit price<input type="number" step="any" name="exit"></label>
-        <label>Stop loss<input type="number" step="any" name="stop"></label>
-        <label>Profit target<input type="number" step="any" name="target"></label>
+        <label>Size <span id="sizeUnit" class="small"></span><input inputmode="decimal" autocomplete="off" name="size" placeholder="1"></label>
+        <label>Entry price<input inputmode="decimal" autocomplete="off" name="entry" required></label>
+        <label>Exit price<input inputmode="decimal" autocomplete="off" name="exit"></label>
+        <label>Stop loss<input inputmode="decimal" autocomplete="off" name="stop"></label>
+        <label>Profit target<input inputmode="decimal" autocomplete="off" name="target"></label>
         <label>Trailing stop<input name="trail" placeholder="e.g. trail 1R below swing lows, or none"></label>
-        <label>Result P&amp;L (money)<input type="number" step="any" name="pnl" placeholder="auto from prices if empty"></label>
-        <label id="fxWrap" hidden><span id="fxLabel"></span><input type="number" step="any" name="fxRate" placeholder="e.g. 1.27"></label>
+        <label>Result P&amp;L (money)<input inputmode="decimal" autocomplete="off" name="pnl" placeholder="auto from prices if empty"></label>
+        <label id="fxWrap" hidden><span id="fxLabel"></span><input inputmode="decimal" autocomplete="off" name="fxRate" placeholder="e.g. 1.27"></label>
       </div>
+      <div class="row" id="qres"><span class="muted small">Quick result:</span><button type="button" class="btn" data-q="target">Hit target</button><button type="button" class="btn" data-q="stop">Hit stop</button><button type="button" class="btn" data-q="be">Breakeven</button></div>
       <label>Entry signal / setup<textarea name="signal" rows="2" placeholder="What exactly triggered the entry?"></textarea></label>
     </fieldset>
 
