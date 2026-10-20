@@ -162,6 +162,23 @@ function autoPnl(t) {
   if (c.cross) return t.fxRate ? (USD_BASE.includes(c.quote) ? raw / t.fxRate : raw * t.fxRate) : null;
   return raw;
 }
+// Exchange rate to convert a cross pair's quote currency to USD, fetched for the trade's date (ECB reference rates via
+// frankfurter.dev, cached). Offline: rough fallback, and the trade is flagged as an estimate (~).
+const FX_APPROX = { EUR: 0.92, GBP: 0.75, AUD: 1.53, NZD: 1.7, JPY: 150, CHF: 0.88, CAD: 1.4 };   // quote currency per 1 USD
+async function getFxRate(quote, date) {
+  const d = new Date(), today = ymd(d.getFullYear(), d.getMonth(), d.getDate()), day = !date || date > today ? 'latest' : date, key = `tj.fx.${day}.${quote}`;
+  let perUsd = num(lsGet(key)), est = false;
+  if (!perUsd) {
+    try {
+      const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 4000);
+      const j = await (await fetch(`https://api.frankfurter.dev/v1/${day}?base=USD&symbols=${quote}`, { signal: ctl.signal })).json();
+      clearTimeout(timer); perUsd = j.rates && j.rates[quote];
+      if (perUsd) lsSet(key, String(perUsd));
+    } catch {}
+  }
+  if (!perUsd) { perUsd = FX_APPROX[quote]; est = true; }
+  return { rate: USD_BASE.includes(quote) ? perUsd : 1 / perUsd, est };   // stored in the same convention the form always used
+}
 function rMultiple(t) {
   if (t.entry == null || t.exit == null || t.stop == null) return null;
   const risk = Math.abs(t.entry - t.stop);
@@ -271,7 +288,7 @@ function renderList() {
     const lv = [['Entry', t.entry], ['Stop', t.stop], ['Target', t.target], ['Exit', t.exit]].filter(x => x[1] != null).map(x => `${x[0]} ${x[1]}`).join(' · ');
     const emo = [['entry', t.emoEntry], ['losers', t.emoLoser], ['winners', t.emoWinner], ['exit', t.emoExit]].filter(x => x[1]).map(x => `${x[1]} (${x[0]})`).join(', ');
     return `<article class="trade ${result(t)}" data-id="${esc(t.id)}" tabindex="0">
-      <div class="h"><span class="sym">${esc(t.instrument)}</span><span class="tag ${t.direction}">${t.direction}</span><span class="muted small">${esc(t.date)}</span>${multi ? `<span class="tag">${esc(acctName(acctOf(t)))}</span>` : ''}${t.plan ? `<span class="tag">plan ${t.plan}/5</span>` : ''}${t.imgCount ? `<span class="tag">📷 ${t.imgCount}</span>` : ''}${r != null ? `<span class="tag">${r.toFixed(2)}R</span>` : ''}<span class="pl ${sgn(pnl)}">${pnl == null ? (t.exit != null ? 'set P&amp;L' : 'open') : money(pnl)}</span></div>
+      <div class="h"><span class="sym">${esc(t.instrument)}</span><span class="tag ${t.direction}">${t.direction}</span><span class="muted small">${esc(t.date)}</span>${multi ? `<span class="tag">${esc(acctName(acctOf(t)))}</span>` : ''}${t.plan ? `<span class="tag">plan ${t.plan}/5</span>` : ''}${t.imgCount ? `<span class="tag">📷 ${t.imgCount}</span>` : ''}${r != null ? `<span class="tag">${r.toFixed(2)}R</span>` : ''}<span class="pl ${sgn(pnl)}">${pnl == null ? (t.exit != null ? 'set P&amp;L' : 'open') : (t.pnlEst ? '~' : '') + money(pnl)}</span></div>
       <div class="meta">${esc(lv)}${t.trail ? ' · trail: ' + esc(t.trail) : ''}</div>
       ${f('Signal', t.signal)}${emo ? `<div class="txt"><b>Emotions:</b> ${esc(emo)}${t.emoNotes ? ' — ' + esc(t.emoNotes) : ''}</div>` : ''}${f('Do better', t.better)}${f('Learned', t.learned)}${t.imgCount ? `<div class="thumbs" data-id="${esc(t.id)}"></div>` : ''}</article>`;
   }).join('');
@@ -340,7 +357,8 @@ function openForm(t, date) {
   f.id.value = t?.id || '';
   fillAcctSelect(f.acct, t ? acctOf(t) : (activeAcct !== 'all' ? activeAcct : lsGet('tj.lastAcct')));
   f.date.value = t?.date || date || ymd(now0.getFullYear(), now0.getMonth(), now0.getDate());
-  if (t) for (const k of ['instrument', 'direction', 'size', 'entry', 'exit', 'stop', 'target', 'trail', 'pnl', 'fxRate', 'signal', 'emoEntry', 'emoLoser', 'emoWinner', 'emoExit', 'emoNotes', 'better', 'learned']) f[k].value = t[k] ?? '';
+  if (t) for (const k of ['instrument', 'direction', 'size', 'entry', 'exit', 'stop', 'target', 'trail', 'pnl', 'signal', 'emoEntry', 'emoLoser', 'emoWinner', 'emoExit', 'emoNotes', 'better', 'learned']) f[k].value = t[k] ?? '';
+  f.fxRate.value = t && t.fxManual ? t.fxRate : '';   // auto rates are re-fetched on save; only a rate you typed is kept
   setRating(t?.plan || 0);
   pendingShots = []; shotsDirty = false; shotsLoaded = !(t && t.imgCount); renderShotGrid();
   if (t && t.imgCount) getShots(t.id).then(arr => { if (form.elements.id.value === t.id && !shotsDirty) { pendingShots = arr.slice(); shotsLoaded = true; renderShotGrid(); } });
@@ -349,28 +367,32 @@ function openForm(t, date) {
   $('#delBtn').hidden = !t;
   dlg.showModal();
 }
-form.addEventListener('submit', e => {
+form.addEventListener('submit', async e => {
   e.preventDefault();
   const f = form.elements, id = f.id.value;
   const LBL = { size: 'Size', entry: 'Entry price', exit: 'Exit price', stop: 'Stop loss', target: 'Profit target', pnl: 'Result P&L', fxRate: 'Conversion rate' };
   for (const k of Object.keys(LBL)) if (f[k].value.trim() !== '' && num(f[k].value) == null) { toast(`${LBL[k]} "${f[k].value}" is not a valid number`); f[k].focus(); return; }
+  const cx = contract(f.instrument.value.trim()), typedFx = num(f.fxRate.value);
+  let fxRate = cx.cross ? typedFx : null, pnlEst = false;
+  if (cx.cross && fxRate == null && num(f.exit.value) != null && num(f.pnl.value) == null) {   // convert to USD automatically
+    const sb = $('#form button[type=submit]'); sb.disabled = true; toast('Getting the exchange rate…');
+    try { const r = await getFxRate(cx.quote, f.date.value); fxRate = r.rate; pnlEst = r.est; } finally { sb.disabled = false; }
+    if (pnlEst) toast('Offline: P&L is an estimate (~). Edit the trade later to refresh it.');
+  }
   const t = {
     id: id || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random())),
     created: id ? (trades.find(x => x.id === id)?.created ?? Date.now()) : Date.now(),
     acct: f.acct.value || 'main', date: f.date.value, instrument: f.instrument.value.trim().toUpperCase(), direction: f.direction.value,
     size: num(f.size.value), entry: num(f.entry.value), exit: num(f.exit.value), stop: num(f.stop.value), target: num(f.target.value),
-    trail: f.trail.value.trim(), pnl: num(f.pnl.value), fxRate: contract(f.instrument.value.trim()).cross ? num(f.fxRate.value) : null, signal: f.signal.value.trim(),
+    trail: f.trail.value.trim(), pnl: num(f.pnl.value), fxRate, fxManual: cx.cross && typedFx != null, pnlEst, signal: f.signal.value.trim(),
     emoEntry: f.emoEntry.value, emoLoser: f.emoLoser.value, emoWinner: f.emoWinner.value, emoExit: f.emoExit.value,
     emoNotes: f.emoNotes.value.trim(), plan: rating || null, better: f.better.value.trim(), learned: f.learned.value.trim(),
   };
   // P&L follows the prices unless you typed your own number (pnlManual). Editing prices on an auto trade recomputes it.
   const prev = trades.find(x => x.id === t.id), auto = autoPnl(t), typed = num(f.pnl.value);
   if (auto != null && (typed == null || (prev && !prev.pnlManual && typed === prev.pnl))) { t.pnl = +auto.toFixed(2); t.pnlManual = false; }
-  else { t.pnl = typed; t.pnlManual = typed != null; }
-  if (t.exit != null && t.pnl == null) {   // exit given but no result: cross pair without a conversion rate
-    const cross = contract(t.instrument).cross; toast(cross ? 'Enter the conversion rate (or type the P&L) so the result can be calculated' : 'Could not calculate the P&L: type it in Result P&L');
-    (cross ? f.fxRate : f.pnl).focus(); return;
-  }
+  else { t.pnl = typed; t.pnlManual = typed != null; t.pnlEst = false; }
+  if (t.exit != null && t.pnl == null) { toast('Could not calculate the P&L: type it in Result P&L'); f.pnl.focus(); return; }
   t.imgCount = shotsDirty ? pendingShots.length : (prev ? prev.imgCount || 0 : 0);
   if (shotsDirty && writable()) putShots(t.id, pendingShots.slice());   // before upsert: the list re-renders (and reads the image cache) inside it
   if (upsertTrades([t])) { lsSet('tj.lastAcct', t.acct); dlg.close(); toast('Trade saved'); }
@@ -379,9 +401,9 @@ function updateInstr() {
   const f = form.elements, c = contract(f.instrument.value);
   $('#sizeUnit').textContent = '(' + c.unit + ')';
   $('#fxWrap').hidden = !c.cross;
-  if (c.cross) $('#fxLabel').textContent = USD_BASE.includes(c.quote) ? `USD${c.quote} rate (${c.quote} per 1 USD) to convert P&L` : `${c.quote}USD rate (USD per 1 ${c.quote}) to convert P&L`;
+  if (c.cross) $('#fxLabel').textContent = (USD_BASE.includes(c.quote) ? `USD${c.quote}` : `${c.quote}USD`) + ' rate (optional: filled in automatically if blank)';
   const p = autoPnl({ instrument: f.instrument.value, entry: num(f.entry.value), exit: num(f.exit.value), size: num(f.size.value), direction: f.direction.value, fxRate: num(f.fxRate.value) });
-  f.pnl.placeholder = p != null ? 'auto: ' + +p.toFixed(2) : c.cross && f.exit.value ? 'enter the rate above' : 'auto from entry & exit';
+  f.pnl.placeholder = p != null ? 'auto: ' + +p.toFixed(2) : c.cross && f.exit.value ? 'auto: exchange rate added on save' : 'auto from entry & exit';
 }
 form.addEventListener('input', updateInstr);
 $('#qres').addEventListener('click', e => {
