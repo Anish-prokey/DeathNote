@@ -120,6 +120,8 @@
       <legend>Screenshots</legend>
       <div id="shotGrid" class="shots"></div>
       <label class="btn" id="shotAdd">+ Add images<input type="file" id="shotFile" accept="image/*" multiple hidden></label>
+      <button type="button" class="btn" id="shotCam">📷 Take photo</button>
+      <input type="file" id="shotCapture" accept="image/*" capture="environment" hidden>
       <span class="muted small">or paste (Ctrl+V) / drop a chart screenshot anywhere in this window. Up to 4, compressed automatically.</span>
     </fieldset>
 
@@ -205,9 +207,27 @@
   </div>
 </dialog>
 
+<dialog id="camDlg" class="small-dlg">
+  <div class="dlg-pad">
+    <video id="camVideo" autoplay playsinline muted></video>
+    <div class="cam-bar">
+      <button type="button" class="btn" id="camCancel">Cancel</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="camFlip" hidden>Switch camera</button>
+      <button type="button" class="btn primary" id="camSnap">Capture</button>
+    </div>
+  </div>
+</dialog>
+
 <dialog id="lightbox"><img id="lbImg" alt="Trade screenshot"></dialog>
 
 <div id="toast" role="status"></div>
+<div id="updBar" role="alert" hidden>
+  <div class="upd-txt"><b>Update available</b> <span id="updVer" class="muted small"></span><div id="updNotes" class="muted small"></div></div>
+  <button type="button" class="btn" id="updLater">Later</button>
+  <button type="button" class="btn primary" id="updGo">Download</button>
+</div>
+<script src="version.js"></script>
 <script src="cloud.bundle.js"></script>
 <script src="app.js"></script>
 </body>

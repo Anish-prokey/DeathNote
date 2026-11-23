@@ -34,4 +34,6 @@ jobs:
         run: |
           cp android/app/build/outputs/apk/debug/app-debug.apk TradingJournal.apk
           gh release delete latest --cleanup-tag --yes || true
-          gh release create latest TradingJournal.apk --target "$GITHUB_SHA" --title "Trading Journal APK (build ${{ github.run_number }})" --notes "Debug APK built from commit ${GITHUB_SHA::7}. Download TradingJournal.apk on your phone and install it over the old version."
+          # The app parses "(build N)" from the title and the "What’s new:" line from the notes: keep both formats.
+          printf 'What’s new: %s\n\nDebug APK built from commit %s. Download TradingJournal.apk on your phone and install it over the old version.\n' "$(git log -1 --format=%s)" "${GITHUB_SHA::7}" > notes.md
+          gh release create latest TradingJournal.apk --target "$GITHUB_SHA" --title "Trading Journal APK (build ${{ github.run_number }})" --notes-file notes.md

@@ -117,7 +117,7 @@ function renderShotGrid() {
     const x = document.createElement('button'); x.type = 'button'; x.className = 'rm'; x.textContent = '×'; x.title = 'Remove'; x.onclick = () => { pendingShots.splice(i, 1); shotsDirty = true; renderShotGrid(); };
     w.append(im, x); g.append(w);
   });
-  $('#shotAdd').hidden = pendingShots.length >= MAX_SHOTS;
+  $('#shotAdd').hidden = $('#shotCam').hidden = pendingShots.length >= MAX_SHOTS;
 }
 async function addFiles(files) {
   const imgs = [...files].filter(f => f.type.startsWith('image/'));
@@ -338,6 +338,44 @@ const dlg = $('#dlg'), form = $('#form');
 // screenshots: lightbox, file picker, paste and drag-drop
 $('#lightbox').addEventListener('click', () => $('#lightbox').close());
 $('#shotFile').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
+
+// camera: phones / the APK use the native camera app (capture input); desktops with a webcam get a live preview
+$('#shotCapture').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
+const cam = { stream: null, facing: 'environment' };
+function camStop() { cam.stream?.getTracks().forEach(t => t.stop()); cam.stream = null; $('#camVideo').srcObject = null; }
+async function camStart() {
+  camStop();
+  cam.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: cam.facing, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+  $('#camVideo').srcObject = cam.stream;
+}
+$('#shotCam').addEventListener('click', async () => {
+  const touch = matchMedia('(pointer: coarse)').matches;
+  if (touch || !navigator.mediaDevices?.getUserMedia) return $('#shotCapture').click();
+  try {
+    await camStart();
+    const vids = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+    $('#camFlip').hidden = vids.length < 2;
+    $('#camDlg').showModal();
+  } catch (err) {
+    camStop();
+    if (err?.name === 'NotAllowedError') toast('Camera permission was denied');
+    else if (err?.name === 'NotFoundError') { toast('No camera found, choose a file instead'); $('#shotCapture').click(); }
+    else toast('Could not open the camera');
+  }
+});
+$('#camFlip').addEventListener('click', () => { cam.facing = cam.facing === 'environment' ? 'user' : 'environment'; camStart().catch(() => toast('Could not switch camera')); });
+$('#camCancel').addEventListener('click', () => $('#camDlg').close());
+$('#camDlg').addEventListener('close', camStop);
+$('#camSnap').addEventListener('click', () => {
+  const v = $('#camVideo');
+  if (!v.videoWidth) return toast('Camera is still starting…');
+  const cv = document.createElement('canvas'); cv.width = v.videoWidth; cv.height = v.videoHeight;
+  cv.getContext('2d').drawImage(v, 0, 0);
+  cv.toBlob(b => {
+    $('#camDlg').close();
+    if (b) addFiles([new File([b], `photo-${Date.now()}.jpg`, { type: 'image/jpeg' })]);
+  }, 'image/jpeg', 0.92);
+});
 dlg.addEventListener('paste', e => { const fs = [...(e.clipboardData?.files || [])]; if (fs.some(f => f.type.startsWith('image/'))) { e.preventDefault(); addFiles(fs); } });
 dlg.addEventListener('dragover', e => { e.preventDefault(); dlg.classList.add('drop'); });
 dlg.addEventListener('dragleave', () => dlg.classList.remove('drop'));
@@ -651,4 +689,30 @@ if (cloudLib) {
 }
 updateAcct();
 renderAll();
+
+// ---- APK update check ----
+// The installed APK knows its CI build number (version.js). GitHub's "latest" release is titled "... (build N)";
+// a bigger N means a newer APK, so offer to download it. Web visitors already get updates on deploy, so this only runs in the app.
+const REL_API = 'https://api.github.com/repos/Anish-prokey/DeathNote/releases/tags/latest';
+const APK_URL = 'https://github.com/Anish-prokey/DeathNote/releases/download/latest/TradingJournal.apk';
+let updDismissed = false, updLastCheck = 0;
+async function checkForUpdate() {
+  const mine = window.TJ_BUILD, native = window.Capacitor?.isNativePlatform?.();
+  if (!mine || !native || updDismissed || !navigator.onLine || Date.now() - updLastCheck < 30 * 60e3) return;
+  updLastCheck = Date.now();
+  try {
+    const r = await fetch(REL_API, { headers: { Accept: 'application/vnd.github+json' }, cache: 'no-store' });
+    if (!r.ok) return;                                   // offline, rate-limited (60/h per IP) or no release: try again later
+    const rel = await r.json(), latest = Number(/build (\d+)/.exec(rel.name || '')?.[1]);
+    if (!(latest > mine)) return;
+    $('#updVer').textContent = `build ${mine} → ${latest}`;
+    $('#updNotes').textContent = (rel.body || '').split('\n').find(l => l.startsWith('What’s new:'))?.slice(11).trim() || '';
+    $('#updBar').hidden = false;
+  } catch { /* network error: try again on next resume */ }
+}
+$('#updLater').onclick = () => { updDismissed = true; $('#updBar').hidden = true; };   // ask again next app launch
+// Leaving the app's own origin hands the URL to Android, which opens it in the browser and downloads the APK.
+$('#updGo').onclick = () => { $('#updBar').hidden = true; toast('Downloading… open the file when it finishes to install'); location.href = APK_URL; };
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(); });
+setTimeout(checkForUpdate, 1500);
 })();
